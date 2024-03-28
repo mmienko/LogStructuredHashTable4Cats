@@ -52,7 +52,7 @@ class LogStructuredHashTable[F[_]: Async] private (
     )
 
   // TODO: Support
-  def keys: fs2.Stream[F, Key] = fs2.Stream.empty
+  def keys: Stream[F, Key] = Stream.empty
 
   def entries[A]: Stream[F, (Key, Value)] =
     keys
@@ -145,7 +145,7 @@ object LogStructuredHashTable {
 
       supervisor <- Supervisor[F](await = true) // await to let writes finish
 
-      handleWrites = fs2.Stream
+      handleWrites = Stream
         .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
         // Encode Key-Value Pair
         .evalMap(put => PutEncoder.encode(put).tupleLeft(put))

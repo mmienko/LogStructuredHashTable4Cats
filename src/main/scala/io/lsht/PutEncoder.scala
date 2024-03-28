@@ -1,7 +1,7 @@
 package io.lsht
 
 import cats.effect.Sync
-import cats.implicits._
+import cats.implicits.*
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
@@ -35,7 +35,7 @@ object PutEncoder {
 
       _ <- Sync[F].delay {
         var cs = checksum
-        for (i <- 0 until 4) {
+        for i <- 0 until 4 do {
           bb.put(4 - i, (cs & 0xff).toByte)
           cs >>= 8
         }
