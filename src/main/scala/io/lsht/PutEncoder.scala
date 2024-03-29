@@ -12,7 +12,7 @@ object PutEncoder {
     4 // 4-byte Value Size
   // TODO?:    4 + // 4-byte Timestamp
 
-  def encode[F[_]: Sync](put: Put[F]): F[ByteBuffer] = {
+  def encode[F[_]: Sync](put: PutData): F[ByteBuffer] = {
     val totalSize = MetaDataByteSize + put.dataSize
 
     for {
@@ -34,9 +34,13 @@ object PutEncoder {
       }
 
       _ <- Sync[F].delay {
-        var cs = checksum
+        /*
+        Java's CheckSum returns a long but CRC32C actually returns an integer.
+        Copy the bottom 4 bytes of long (the int part) to the ByteBuffer
+         */
+        var cs: Long = checksum
         for i <- 0 until 4 do {
-          bb.put(4 - i, (cs & 0xff).toByte)
+          bb.put(3 - i, (cs & 0xff).toByte)
           cs >>= 8
         }
       }
