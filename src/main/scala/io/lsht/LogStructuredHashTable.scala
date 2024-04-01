@@ -12,8 +12,8 @@ import java.nio.ByteBuffer
 import scala.util.control.NoStackTrace
 
 class LogStructuredHashTable[F[_]: Async] private (
-    queue: QueueSink[F, Put[F]],
-    index: Ref[F, Map[Key, ValueFileReference]]
+  queue: QueueSink[F, Put[F]],
+  index: Ref[F, Map[Key, ValueFileReference]]
 ) {
 
   def get(key: Key): F[Option[Value]] =
@@ -77,14 +77,14 @@ object LogStructuredHashTable {
 
   // TODO: s/Console/Logger
   def apply[F[_]: Async: Console](
-      directory: Path
-  ): Resource[F, LogStructuredHashTable[F]] = {
+    directory: Path
+  ): Resource[F, LogStructuredHashTable[F]] =
     for {
       _ <- Resource.eval(verifyPathIsDirectory[F](directory))
 
       files <- Resource.eval(getFiles(directory))
 
-      _ <- files.sortBy(_.fileName.toString).toList match {
+      db <- files.sortBy(_.fileName.toString).toList match {
         case ::(head, next) =>
           /*
           Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use
@@ -122,14 +122,9 @@ object LogStructuredHashTable {
           // new DB
           createNewDatabase(directory)
       }
-    } yield ()
+    } yield db
 
-    ???
-  }
-
-  private def createNewDatabase[F[_]: Async: Console: Clock](
-      directory: Path
-  ) = {
+  private def createNewDatabase[F[_]: Async: Console: Clock](directory: Path) =
     for {
       now <- Resource.eval(Clock[F].realTime)
 
@@ -150,34 +145,36 @@ object LogStructuredHashTable {
         // Encode Key-Value Pair
         .evalMap(put => PutEncoder.encode(put).tupleLeft(put))
         // Write to file, rotating if necessary
-        .evalMap { case (put, bytes) =>
-          // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
-          //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
-          //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
-          //  space.
-          Files[F].open(writerFile, Flags.Append).use { fh =>
-            fh.size
-              .flatMap { offset =>
-                fh.write(Chunk.byteBuffer(bytes), offset)
-                  .as(offset + PutEncoder.MetaDataByteSize)
-              }
-              .tupleLeft(put)
-          }
+        .evalMap {
+          case (put, bytes) =>
+            // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
+            //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
+            //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
+            //  space.
+            Files[F].open(writerFile, Flags.Append).use { fh =>
+              fh.size
+                .flatMap { offset =>
+                  fh.write(Chunk.byteBuffer(bytes), offset)
+                    .as(offset + PutEncoder.MetaDataByteSize)
+                }
+                .tupleLeft(put)
+            }
         }
         // Update in-memory index, for reads
-        .evalMap { case (put, offset) =>
-          index
-            .update(
-              _.updated(
-                put.key,
-                ValueFileReference(
-                  filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
-                  positionInFile = offset,
-                  valueSize = put.value.length
+        .evalMap {
+          case (put, offset) =>
+            index
+              .update(
+                _.updated(
+                  put.key,
+                  ValueFileReference(
+                    filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
+                    positionInFile = offset,
+                    valueSize = put.value.length
+                  )
                 )
               )
-            )
-            .as(put.signal)
+              .as(put.signal)
         }
         // Signal complete to writer thread
         .evalMap(_.complete(()))
@@ -185,8 +182,7 @@ object LogStructuredHashTable {
         .drain
 
       _ <- Resource.eval(supervisor.supervise(handleWrites))
-    } yield ()
-  }
+    } yield new LogStructuredHashTable(queue, index)
 
   private def verifyPathIsDirectory[F[_]: Async](directory: Path) =
     Files[F]
@@ -210,11 +206,17 @@ object LogStructuredHashTable {
       .compile
       .toVector
 
-  private final case class ValueFileReference(filePath: Path, positionInFile: Long, valueSize: Int)
+  private final case class ValueFileReference(filePath: Path,
+                                              positionInFile: Long,
+                                              valueSize: Int)
 
   final class PathNotADirectory extends Throwable with NoStackTrace
 
-  final class WriteFailure(cause: Throwable) extends Throwable(cause) with NoStackTrace
+  final class WriteFailure(cause: Throwable)
+      extends Throwable(cause)
+      with NoStackTrace
 
-  final class CorruptedDataFile extends Throwable("Read failed") with NoStackTrace
+  final class CorruptedDataFile
+      extends Throwable("Read failed")
+      with NoStackTrace
 }
