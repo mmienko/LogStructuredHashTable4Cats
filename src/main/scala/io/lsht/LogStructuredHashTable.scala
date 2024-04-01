@@ -138,7 +138,11 @@ object LogStructuredHashTable {
 
       queue <- Resource.eval(Queue.unbounded[F, Put[F]])
 
-      supervisor <- Supervisor[F](await = true) // await to let writes finish
+      // TODO: Since cancellation is allowed, use bracket to handle writing to file (bundle all the evalMap's) and
+      //  bracket the whole stream itself. Each calls complete on Write's, latter drains the whole queue. Should there
+      //  also be a flag to prevent adding to queue? Probably not b/c only inner resources would write and they would
+      //  be closed first, unless there is a leak or some background task.
+      supervisor <- Supervisor[F](await = false)
 
       handleWrites = Stream
         .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
