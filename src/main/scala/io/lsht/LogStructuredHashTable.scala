@@ -146,42 +146,43 @@ object LogStructuredHashTable {
 
       handleWrites = Stream
         .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
-        // Encode Key-Value Pair
-        .evalMap(put => PutEncoder.encode(put).tupleLeft(put))
-        // Write to file, rotating if necessary
-        .evalMap {
-          case (put, bytes) =>
+        .evalMap { put =>
+          // TODO: onError: complete with error
+          for {
+            // Encode Key-Value Pair
+            bytes <- PutEncoder.encode(put)
+
+            // Write to file, rotating if necessary
             // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
             //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
             //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
             //  space.
-            Files[F].open(writerFile, Flags.Append).use { fh =>
-              fh.size
-                .flatMap { offset =>
-                  fh.write(Chunk.byteBuffer(bytes), offset)
-                    .as(offset + PutEncoder.MetaDataByteSize)
-                }
-                .tupleLeft(put)
+            positionOfValue <- Files[F].open(writerFile, Flags.Append).use {
+              fh =>
+                fh.size
+                  .flatMap { offset =>
+                    fh.write(Chunk.byteBuffer(bytes), offset)
+                      .as(offset + PutEncoder.MetaDataByteSize + put.key.length)
+                  }
             }
-        }
-        // Update in-memory index, for reads
-        .evalMap {
-          case (put, offset) =>
-            index
+
+            // Update in-memory index, for reads
+            _ <- index
               .update(
                 _.updated(
                   put.key,
                   ValueFileReference(
                     filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
-                    positionInFile = offset,
+                    positionInFile = positionOfValue,
                     valueSize = put.value.length
                   )
                 )
               )
-              .as(put.signal)
+
+            // Signal complete to writer thread
+            _ <- put.signal.complete(())
+          } yield ()
         }
-        // Signal complete to writer thread
-        .evalMap(_.complete(()))
         .compile
         .drain
 

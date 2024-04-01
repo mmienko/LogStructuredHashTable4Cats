@@ -17,4 +17,20 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       .use(IO.pure)
   }
 
+  test("Database supports reads and writes") {
+    (for {
+      dir <- Files[IO].tempDirectory
+      db <- LogStructuredHashTable[IO](dir)
+    } yield db).use { db =>
+      val key = "key".getBytes
+      val value: Value = "value".getBytes
+      for {
+        res <- db.get(key)
+        _ <- expect(res.isEmpty).failFast
+        _ <- db.put(key, value)
+        res <- db.get(key)
+      } yield exists(res)(v => expect(new String(v) === "value"))
+    }
+  }
+
 }
