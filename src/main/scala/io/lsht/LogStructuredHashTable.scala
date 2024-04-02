@@ -42,7 +42,8 @@ class LogStructuredHashTable[F[_]: Async] private (
         case () =>
           Applicative[F].unit
         case cause: Throwable =>
-          ApplicativeError[F, Throwable].raiseError[Unit](WriteFailure(cause))
+          ApplicativeError[F, Throwable]
+            .raiseError[Unit](Errors.Write.Failed(cause))
       }
     } yield ()
 
@@ -193,9 +194,10 @@ object LogStructuredHashTable {
   private def verifyPathIsDirectory[F[_]: Async](directory: Path) =
     Files[F]
       .isDirectory(directory, followLinks = false)
-      .flatMap(
-        ApplicativeError[F, Throwable].raiseUnless(_)(PathNotADirectory())
-      )
+      .flatMap {
+        ApplicativeError[F, Throwable]
+          .raiseUnless(_)(Errors.Startup.PathNotADirectory)
+      }
 
   private def getFiles[F[_]: Async: Console](directory: Path): F[Vector[Path]] =
     Files[F]
@@ -215,11 +217,5 @@ object LogStructuredHashTable {
   private final case class EntryFileReference(filePath: Path,
                                               positionInFile: Long,
                                               entrySize: Int)
-
-  final class PathNotADirectory extends Throwable with NoStackTrace
-
-  final class WriteFailure(cause: Throwable)
-      extends Throwable(cause)
-      with NoStackTrace
 
 }
