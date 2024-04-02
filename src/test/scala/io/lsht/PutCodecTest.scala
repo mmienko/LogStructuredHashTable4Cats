@@ -14,10 +14,7 @@ object PutCodecTest extends SimpleIOSuite {
   private val KeyAndValueSizesSize = 8
 
   test("Encode Put with non-empty key and non-empty value") {
-    val put = new PutData {
-      override val key: Key = "key1".getBytes
-      override val value: Value = "value1".getBytes
-    }
+    val put = Put("key1".getBytes, "value1".getBytes)
 
     val KeySize = 4
     val ValueSize = 6
@@ -46,10 +43,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with non-empty key but empty value") {
-    val put = new PutData {
-      override val key: Key = "key1".getBytes
-      override val value: Value = "".getBytes
-    }
+    val put = Put("key1".getBytes, "".getBytes)
 
     val KeySize = 4
     val ValueSize = 0
@@ -78,10 +72,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with empty key but non-empty value") {
-    val put = new PutData {
-      override val key: Key = "".getBytes
-      override val value: Value = "value1".getBytes
-    }
+    val put = Put("".getBytes, "value1".getBytes)
 
     val KeySize = 0
     val ValueSize = 6
@@ -110,10 +101,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with empty key and empty value") {
-    val put = new PutData {
-      override val key: Key = "".getBytes
-      override val value: Value = "".getBytes
-    }
+    val put = Put("".getBytes, "".getBytes)
 
     val KeySize = 0
     val ValueSize = 0
@@ -142,10 +130,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode bytes of non-empty key and non-empty value") {
-    val put = new PutData {
-      override val key: Key = "key1".getBytes
-      override val value: Value = "value1".getBytes
-    }
+    val put = Put("key1".getBytes, "value1".getBytes)
 
     PutCodec
       .encode(put)
@@ -158,10 +143,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode bytes of non-empty key but empty value") {
-    val put = new PutData {
-      override val key: Key = "key1".getBytes
-      override val value: Value = "".getBytes
-    }
+    val put = Put("key1".getBytes, "".getBytes)
 
     PutCodec
       .encode(put)
@@ -174,10 +156,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode bytes of empty key but non-empty value") {
-    val put = new PutData {
-      override val key: Key = "".getBytes
-      override val value: Value = "value1".getBytes
-    }
+    val put = Put("".getBytes, "value1".getBytes)
 
     PutCodec
       .encode(put)
@@ -190,10 +169,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode bytes of empty key and empty value") {
-    val put = new PutData {
-      override val key: Key = "".getBytes
-      override val value: Value = "".getBytes
-    }
+    val put = Put("".getBytes, "".getBytes)
 
     PutCodec
       .encode(put)
@@ -206,10 +182,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode fails if checksum does not match") {
-    val put = new PutData {
-      override val key: Key = "key1".getBytes
-      override val value: Value = "value1".getBytes
-    }
+    val put = Put("key1".getBytes, "value1".getBytes)
 
     for {
       bytes <- PutCodec.encode(put)

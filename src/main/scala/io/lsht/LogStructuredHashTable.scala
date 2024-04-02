@@ -12,8 +12,8 @@ import java.nio.ByteBuffer
 import scala.util.control.NoStackTrace
 
 class LogStructuredHashTable[F[_]: Async] private (
-  queue: QueueSink[F, Put[F]],
-  index: Ref[F, Map[Key, EntryFileReference]]
+    queue: QueueSink[F, PutCommand[F]],
+    index: Ref[F, Map[Key, EntryFileReference]]
 ) {
 
   def get(key: Key): F[Option[Value]] =
@@ -35,10 +35,10 @@ class LogStructuredHashTable[F[_]: Async] private (
 
   def put(key: Key, value: Value): F[Unit] =
     for {
-      signal <- Deferred[F, PutResult]
-      _ <- queue.offer(Put(key, value, signal))
-      putResult <- signal.get
-      _ <- putResult match {
+      cmd <- PutCommand(key, value)
+      _ <- queue.offer(cmd)
+      result <- cmd.waitUntilComplete
+      _ <- result match {
         case () =>
           Applicative[F].unit
         case cause: Throwable =>
@@ -79,7 +79,7 @@ object LogStructuredHashTable {
 
   // TODO: s/Console/Logger
   def apply[F[_]: Async: Console](
-    directory: Path
+      directory: Path
   ): Resource[F, LogStructuredHashTable[F]] =
     for {
       _ <- Resource.eval(verifyPathIsDirectory[F](directory))
@@ -138,7 +138,7 @@ object LogStructuredHashTable {
       // TODO: how does Array[Byte] hash?
       index <- Resource.eval(Ref[F].of(Map.empty[Key, EntryFileReference]))
 
-      queue <- Resource.eval(Queue.unbounded[F, Put[F]])
+      queue <- Resource.eval(Queue.unbounded[F, PutCommand[F]])
 
       // TODO: Since cancellation is allowed, use bracket to handle writing to file (bundle all the evalMap's) and
       //  bracket the whole stream itself. Each calls complete on Write's, latter drains the whole queue. Should there
@@ -148,31 +148,30 @@ object LogStructuredHashTable {
 
       handleWrites = Stream
         .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
-        .evalMap { put =>
+        .evalMap { putCmd =>
           // TODO: onError: complete with error
           for {
             // Encode Key-Value Pair
-            bytes <- PutCodec.encode(put)
+            bytes <- PutCodec.encode(putCmd.put)
 
             // Write to file, rotating if necessary
             // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
             //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
             //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
             //  space.
-            positionOfEntry <- Files[F].open(writerFile, Flags.Append).use {
-              fh =>
-                fh.size
-                  .flatMap { offset =>
-                    fh.write(Chunk.byteBuffer(bytes), offset)
-                      .as(offset)
-                  }
+            positionOfEntry <- Files[F].open(writerFile, Flags.Append).use { fh =>
+              fh.size
+                .flatMap { offset =>
+                  fh.write(Chunk.byteBuffer(bytes), offset)
+                    .as(offset)
+                }
             }
 
             // Update in-memory index, for reads
             _ <- index
               .update(
                 _.updated(
-                  put.key,
+                  putCmd.key,
                   EntryFileReference(
                     filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
                     positionInFile = positionOfEntry,
@@ -182,7 +181,7 @@ object LogStructuredHashTable {
               )
 
             // Signal complete to writer thread
-            _ <- put.signal.complete(())
+            _ <- putCmd.complete(())
           } yield ()
         }
         .compile
@@ -214,8 +213,6 @@ object LogStructuredHashTable {
       .compile
       .toVector
 
-  private final case class EntryFileReference(filePath: Path,
-                                              positionInFile: Long,
-                                              entrySize: Int)
+  private final case class EntryFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
 
 }
