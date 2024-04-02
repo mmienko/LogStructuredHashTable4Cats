@@ -76,10 +76,9 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
             .failFast
           _ <- ids.parTraverse(id => db.put(id, value))
           gets <- ids.parTraverse(db.get)
-        } yield
-          gets
-            .map(res => exists(res)(v => expect(new String(v) === "value")))
-            .reduce((a, b) => a and b)
+        } yield gets
+          .map(res => exists(res)(v => expect(new String(v) === "value")))
+          .reduce((a, b) => a and b)
       }
   }
 
@@ -93,18 +92,15 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
           .evals(ids.pure[IO])
           .chunkN(20)
           .evalMap { ids =>
-            LogStructuredHashTable[IO](dir).use(
-              db => ids.parTraverse_(db.put(_, value))
-            )
+            LogStructuredHashTable[IO](dir).use(db => ids.parTraverse_(db.put(_, value)))
           }
           .compile
           .drain
         gets <- LogStructuredHashTable[IO](dir)
           .use(db => ids.parTraverse(db.get))
-      } yield
-        gets
-          .map(res => exists(res)(v => expect(new String(v) === "value")))
-          .reduce((a, b) => a and b)
+      } yield gets
+        .map(res => exists(res)(v => expect(new String(v) === "value")))
+        .reduce((a, b) => a and b)
     }
   }
 

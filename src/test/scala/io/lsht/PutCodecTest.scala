@@ -193,11 +193,9 @@ object PutCodecTest extends SimpleIOSuite {
           .put(corruptionOffset + 1, 1.toByte)
       )
       res <- PutCodec.decode(Chunk.byteBuffer(bytes)).attempt
-    } yield
-      matches(res) {
-        case Left(error) =>
-          expect(error == Errors.Read.BadChecksum)
-      }
+    } yield matches(res) { case Left(error) =>
+      expect(error == Errors.Read.BadChecksum)
+    }
   }
 
   private def getString(bytes: Int)(byteBuffer: ByteBuffer): String = {

@@ -5,11 +5,11 @@ import scala.util.control.NoStackTrace
 object Errors {
 
   open class StartupException extends Throwable
-  
+
   object Startup {
     object PathNotADirectory extends StartupException with NoStackTrace
   }
-  
+
   open class ReadException extends Throwable
 
   object Read {
@@ -19,10 +19,8 @@ object Errors {
   }
 
   open class WriteException(cause: Throwable) extends Throwable(cause)
-  
+
   object Write {
-    class Failed(cause: Throwable)
-      extends WriteException(cause)
-        with NoStackTrace
+    class Failed(cause: Throwable) extends WriteException(cause) with NoStackTrace
   }
 }
