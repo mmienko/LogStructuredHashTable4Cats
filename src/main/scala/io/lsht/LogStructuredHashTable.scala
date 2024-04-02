@@ -3,12 +3,13 @@ package io.lsht
 import cats.effect.std.{Console, Queue, QueueSink, Supervisor}
 import cats.effect.*
 import cats.syntax.all.*
-import cats.{Applicative, ApplicativeError, Monoid, Semigroup}
+import cats.{Applicative, ApplicativeError, Monad, Monoid, Semigroup}
 import fs2.io.file.{Files, Flags, Path}
 import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
 
 import java.nio.ByteBuffer
+import scala.concurrent.CancellationException
 import scala.util.control.NoStackTrace
 
 class LogStructuredHashTable[F[_]: Async] private (
@@ -135,59 +136,29 @@ object LogStructuredHashTable {
       // TODO: what happens if file already exists? B/c two programs are running?
       _ <- Resource.eval(Files[F].createFile(writerFile))
 
-      // TODO: how does Array[Byte] hash?
       index <- Resource.eval(Ref[F].of(Map.empty[Key, EntryFileReference]))
 
       queue <- Resource.eval(Queue.unbounded[F, PutCommand[F]])
 
-      // TODO: Since cancellation is allowed, use bracket to handle writing to file (bundle all the evalMap's) and
-      //  bracket the whole stream itself. Each calls complete on Write's, latter drains the whole queue. Should there
-      //  also be a flag to prevent adding to queue? Probably not b/c only inner resources would write and they would
-      //  be closed first, unless there is a leak or some background task.
-      supervisor <- Supervisor[F](await = false)
+      seriallyExecuteWrites = MonadCancel[F].guaranteeCase(
+        Stream
+          .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
+          .evalMap(executeCommand(writerFile, index))
+          .compile
+          .drain
+      ) {
+        case Outcome.Succeeded(_) =>
+          ().pure[F]
 
-      handleWrites = Stream
-        .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
-        .evalMap { putCmd =>
-          // TODO: onError: complete with error
-          for {
-            // Encode Key-Value Pair
-            bytes <- PutCodec.encode(putCmd.put)
+        case Outcome.Errored(e) =>
+          drain(queue).flatMap(_.traverse_(_.complete(e)))
 
-            // Write to file, rotating if necessary
-            // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
-            //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
-            //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
-            //  space.
-            positionOfEntry <- Files[F].open(writerFile, Flags.Append).use { fh =>
-              fh.size
-                .flatMap { offset =>
-                  fh.write(Chunk.byteBuffer(bytes), offset)
-                    .as(offset)
-                }
-            }
+        case Outcome.Canceled() =>
+          drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
+      }
 
-            // Update in-memory index, for reads
-            _ <- index
-              .update(
-                _.updated(
-                  putCmd.key,
-                  EntryFileReference(
-                    filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
-                    positionInFile = positionOfEntry,
-                    entrySize = bytes.capacity()
-                  )
-                )
-              )
-
-            // Signal complete to writer thread
-            _ <- putCmd.complete(())
-          } yield ()
-        }
-        .compile
-        .drain
-
-      _ <- Resource.eval(supervisor.supervise(handleWrites))
+      _ <- Supervisor[F](await = false)
+        .evalMap(_.supervise(seriallyExecuteWrites))
     } yield new LogStructuredHashTable(queue, index)
 
   private def verifyPathIsDirectory[F[_]: Async](directory: Path) =
@@ -212,6 +183,65 @@ object LogStructuredHashTable {
       }
       .compile
       .toVector
+
+  private def executeCommand[F[_]: Async: Console: Clock](
+      writerFile: Path,
+      index: Ref[F, Map[Key, EntryFileReference]]
+  )(putCmd: PutCommand[F]) = {
+    def guarantee[A](fa: F[A])(onCancel: => Errors.WriteException): F[A] =
+      MonadCancel[F].guaranteeCase(fa) {
+        case Outcome.Succeeded(_) => ().pure[F]
+        case Outcome.Errored(e) => putCmd.complete(Errors.Write.Failed(e)).void
+        case Outcome.Canceled() => putCmd.complete(onCancel).void
+      }
+
+    for {
+      // Encode Key-Value Pair
+      bytes <- guarantee(PutCodec.encode(putCmd.put))(
+        onCancel = Errors.Write.Cancelled
+      )
+
+      // Write to file, rotating if necessary
+      // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
+      //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
+      //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
+      //  space.
+      positionOfEntry <- guarantee(
+        Files[F].open(writerFile, Flags.Append).use { fh =>
+          fh.size
+            .flatMap { offset =>
+              fh.write(Chunk.byteBuffer(bytes), offset)
+                .as(offset)
+            }
+        }
+      )(onCancel = Errors.Write.CancelledButSavedToDisk)
+
+      // Update in-memory index, for reads
+      _ <- guarantee(
+        index.update(
+          _.updated(
+            putCmd.key,
+            EntryFileReference(
+              filePath = writerFile,
+              positionInFile = positionOfEntry,
+              entrySize = bytes.capacity()
+            )
+          )
+        )
+      )(onCancel = Errors.Write.CancelledButSavedToDisk)
+
+      // Signal complete to writer thread
+      _ <- putCmd.complete(())
+    } yield ()
+  }
+
+  private def drain[F[_]: Monad](
+      queue: Queue[F, PutCommand[F]]
+  ): F[List[PutCommand[F]]] =
+    queue.size
+      .map(_ + 100)
+      .map(_.some)
+      .flatMap(queue.tryTakeN)
 
   private final case class EntryFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
 
