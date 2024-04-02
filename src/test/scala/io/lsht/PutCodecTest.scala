@@ -2,12 +2,13 @@ package io.lsht
 
 import cats.effect.*
 import cats.syntax.all.*
+import fs2.Chunk
 import weaver.*
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
 
-object PutEncoderTest extends SimpleIOSuite {
+object PutCodecTest extends SimpleIOSuite {
 
   private val ChecksumSize = 4
   private val KeyAndValueSizesSize = 8
@@ -22,7 +23,7 @@ object PutEncoderTest extends SimpleIOSuite {
     val ValueSize = 6
 
     for {
-      bb <- PutEncoder.encode(put)
+      bb <- PutCodec.encode(put)
 
       crc <- IO(bb.getInt)
       nonChecksumBytes <- IO(
@@ -54,7 +55,7 @@ object PutEncoderTest extends SimpleIOSuite {
     val ValueSize = 0
 
     for {
-      bb <- PutEncoder.encode(put)
+      bb <- PutCodec.encode(put)
 
       crc <- IO(bb.getInt)
       nonChecksumBytes <- IO(
@@ -86,7 +87,7 @@ object PutEncoderTest extends SimpleIOSuite {
     val ValueSize = 6
 
     for {
-      bb <- PutEncoder.encode(put)
+      bb <- PutCodec.encode(put)
 
       crc <- IO(bb.getInt)
       nonChecksumBytes <- IO(
@@ -118,7 +119,7 @@ object PutEncoderTest extends SimpleIOSuite {
     val ValueSize = 0
 
     for {
-      bb <- PutEncoder.encode(put)
+      bb <- PutCodec.encode(put)
 
       crc <- IO(bb.getInt)
       nonChecksumBytes <- IO(
@@ -138,6 +139,92 @@ object PutEncoderTest extends SimpleIOSuite {
 
       value <- IO(getString(valueSize)(bb))
     } yield expect(value === "")
+  }
+
+  test("Decode bytes of non-empty key and non-empty value") {
+    val put = new PutData {
+      override val key: Key = "key1".getBytes
+      override val value: Value = "value1".getBytes
+    }
+
+    PutCodec
+      .encode(put)
+      .map(Chunk.byteBuffer)
+      .flatMap(PutCodec.decode)
+      .map { putValue =>
+        expect(new String(putValue.key) === "key1") and
+          expect(new String(putValue.value) === "value1")
+      }
+  }
+
+  test("Decode bytes of non-empty key but empty value") {
+    val put = new PutData {
+      override val key: Key = "key1".getBytes
+      override val value: Value = "".getBytes
+    }
+
+    PutCodec
+      .encode(put)
+      .map(Chunk.byteBuffer)
+      .flatMap(PutCodec.decode)
+      .map { putValue =>
+        expect(new String(putValue.key) === "key1") and
+          expect(new String(putValue.value) === "")
+      }
+  }
+
+  test("Decode bytes of empty key but non-empty value") {
+    val put = new PutData {
+      override val key: Key = "".getBytes
+      override val value: Value = "value1".getBytes
+    }
+
+    PutCodec
+      .encode(put)
+      .map(Chunk.byteBuffer)
+      .flatMap(PutCodec.decode)
+      .map { putValue =>
+        expect(new String(putValue.key) === "") and
+          expect(new String(putValue.value) === "value1")
+      }
+  }
+
+  test("Decode bytes of empty key and empty value") {
+    val put = new PutData {
+      override val key: Key = "".getBytes
+      override val value: Value = "".getBytes
+    }
+
+    PutCodec
+      .encode(put)
+      .map(Chunk.byteBuffer)
+      .flatMap(PutCodec.decode)
+      .map { putValue =>
+        expect(new String(putValue.key) === "") and
+          expect(new String(putValue.value) === "")
+      }
+  }
+
+  test("Decode fails if checksum does not match") {
+    val put = new PutData {
+      override val key: Key = "key1".getBytes
+      override val value: Value = "value1".getBytes
+    }
+
+    for {
+      bytes <- PutCodec.encode(put)
+      corruptionOffset = ChecksumSize + KeyAndValueSizesSize
+      _ <- IO(
+        bytes
+          .put(corruptionOffset, 1.toByte)
+          .put(corruptionOffset + 1, 1.toByte)
+      )
+      res <- PutCodec.decode(Chunk.byteBuffer(bytes)).attempt
+    } yield
+      matches(res) {
+        case Left(error) =>
+          expect(error == Errors.Read.BadChecksum)
+      }
   }
 
   private def getString(bytes: Int)(byteBuffer: ByteBuffer): String = {

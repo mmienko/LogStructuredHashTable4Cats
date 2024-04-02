@@ -12,6 +12,8 @@
    11) Errors bubble up; write to a file and then move it behind the scenes to create some error
    12) Test partially written values, mimicking a crash
 2) Implement Delete method and add tests. Add some edge case tests around certain usage pattens like deleting everything.
+3) Use scala property based testing for PutCodec and other parts of codebase?
+4) Organize errors. Read errors are nested properly, likewise for open db, and writes. Keep a central file of Object's.
 3) Implement rotating files
 4) Implement compaction
 5) Write TLA+ specs
@@ -22,3 +24,4 @@
    1) Read/Write Latency
    2) Startup time, compaction should help loading indexes
 8) Implement ReadCursor resource object pool
+9) Implement TTL

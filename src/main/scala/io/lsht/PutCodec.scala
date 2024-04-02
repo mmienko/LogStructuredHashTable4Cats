@@ -2,11 +2,12 @@ package io.lsht
 
 import cats.effect.Sync
 import cats.implicits.*
+import fs2.Chunk
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
 
-object PutEncoder {
+object PutCodec {
   val MetaDataByteSize: Int = 4 + // 4-byte CRC
     4 + // 4-byte Key Size
     4 // 4-byte Value Size
@@ -46,4 +47,24 @@ object PutEncoder {
       }
     } yield bb
   }
+
+  def decode[F[_] : Sync](bytes: Chunk[Byte]): F[PutValue] = Sync[F].delay {
+    val bb = bytes.toByteBuffer
+    val checksum = bb.getInt
+
+    val crc32c = new CRC32C
+    crc32c.update(bb.slice(4, bytes.size - 4))
+    if crc32c.getValue.toInt != checksum then
+      throw Errors.Read.BadChecksum
+
+    val keySize = bb.getInt
+    val valueSize = bb.getInt
+    val key = Array.fill(keySize)(0.toByte)
+    bb.get(key)
+    val value = Array.fill(valueSize)(0.toByte)
+    bb.get(value)
+
+    PutValue(key, value)
+  }
+
 }

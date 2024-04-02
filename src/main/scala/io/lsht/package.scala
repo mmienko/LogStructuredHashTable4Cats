@@ -13,6 +13,9 @@ trait PutData {
   def dataSize: Int = key.length + value.length
 }
 
+// TODO: Nest thus under Put, have easy apply. Can also call Put, PutCommand
+private final case class PutValue(key: Key, value: Value) extends PutData
+
 private final case class Put[F[_]](
     key: Key,
     value: Value,

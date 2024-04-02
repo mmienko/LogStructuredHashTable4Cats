@@ -13,19 +13,20 @@ import scala.util.control.NoStackTrace
 
 class LogStructuredHashTable[F[_]: Async] private (
   queue: QueueSink[F, Put[F]],
-  index: Ref[F, Map[Key, ValueFileReference]]
+  index: Ref[F, Map[Key, EntryFileReference]]
 ) {
 
   def get(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
-      case Some(ValueFileReference(filePath, positionInFile, valueSize)) =>
+      case Some(EntryFileReference(filePath, positionInFile, entrySize)) =>
         // TODO: Use an object pool for efficient resource/file management
         Files[F].open(filePath, Flags.Read).use { fh =>
-          fh.read(numBytes = valueSize, offset = positionInFile)
-            .flatMap(
-              ApplicativeError[F, Throwable].fromOption(_, CorruptedDataFile())
-            )
-            .flatMap(bytesChunk => Sync[F].delay(bytesChunk.toArray.some))
+          for {
+            bytes <- fh.read(numBytes = entrySize, offset = positionInFile)
+            bytes <- ApplicativeError[F, Throwable]
+              .fromOption(bytes, Errors.Read.CorruptedDataFile)
+            putValue <- PutCodec.decode(bytes)
+          } yield putValue.value.some
         }
 
       case None =>
@@ -134,7 +135,7 @@ object LogStructuredHashTable {
       _ <- Resource.eval(Files[F].createFile(writerFile))
 
       // TODO: how does Array[Byte] hash?
-      index <- Resource.eval(Ref[F].of(Map.empty[Key, ValueFileReference]))
+      index <- Resource.eval(Ref[F].of(Map.empty[Key, EntryFileReference]))
 
       queue <- Resource.eval(Queue.unbounded[F, Put[F]])
 
@@ -150,19 +151,19 @@ object LogStructuredHashTable {
           // TODO: onError: complete with error
           for {
             // Encode Key-Value Pair
-            bytes <- PutEncoder.encode(put)
+            bytes <- PutCodec.encode(put)
 
             // Write to file, rotating if necessary
             // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
             //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
             //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
             //  space.
-            positionOfValue <- Files[F].open(writerFile, Flags.Append).use {
+            positionOfEntry <- Files[F].open(writerFile, Flags.Append).use {
               fh =>
                 fh.size
                   .flatMap { offset =>
                     fh.write(Chunk.byteBuffer(bytes), offset)
-                      .as(offset + PutEncoder.MetaDataByteSize + put.key.length)
+                      .as(offset)
                   }
             }
 
@@ -171,10 +172,10 @@ object LogStructuredHashTable {
               .update(
                 _.updated(
                   put.key,
-                  ValueFileReference(
+                  EntryFileReference(
                     filePath = writerFile, // TODO: Need to pass writerFile from potential rotation
-                    positionInFile = positionOfValue,
-                    valueSize = put.value.length
+                    positionInFile = positionOfEntry,
+                    entrySize = bytes.capacity()
                   )
                 )
               )
@@ -211,9 +212,9 @@ object LogStructuredHashTable {
       .compile
       .toVector
 
-  private final case class ValueFileReference(filePath: Path,
+  private final case class EntryFileReference(filePath: Path,
                                               positionInFile: Long,
-                                              valueSize: Int)
+                                              entrySize: Int)
 
   final class PathNotADirectory extends Throwable with NoStackTrace
 
@@ -221,7 +222,4 @@ object LogStructuredHashTable {
       extends Throwable(cause)
       with NoStackTrace
 
-  final class CorruptedDataFile
-      extends Throwable("Read failed")
-      with NoStackTrace
 }
