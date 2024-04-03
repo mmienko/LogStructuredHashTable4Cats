@@ -25,3 +25,4 @@
    2) Startup time, compaction should help loading indexes
 8) Implement ReadCursor resource object pool
 9) Implement TTL
+10) Does it make sense to use different Checksums depending on the length of data? Is there different performance?

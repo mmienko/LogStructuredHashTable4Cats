@@ -1,16 +1,12 @@
 package io.lsht
 
-import cats.effect.std.{Console, Queue, QueueSink, Supervisor}
 import cats.effect.*
+import cats.effect.std.{Console, Queue, QueueSink, Supervisor}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError, Monad, Monoid, Semigroup}
 import fs2.io.file.{Files, Flags, Path}
 import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
-
-import java.nio.ByteBuffer
-import scala.concurrent.CancellationException
-import scala.util.control.NoStackTrace
 
 class LogStructuredHashTable[F[_]: Async] private (
     queue: QueueSink[F, PutCommand[F]],
@@ -21,14 +17,23 @@ class LogStructuredHashTable[F[_]: Async] private (
     index.get.map(_.get(key)).flatMap {
       case Some(EntryFileReference(filePath, positionInFile, entrySize)) =>
         // TODO: Use an object pool for efficient resource/file management
-        Files[F].open(filePath, Flags.Read).use { fh =>
-          for {
-            bytes <- fh.read(numBytes = entrySize, offset = positionInFile)
-            bytes <- ApplicativeError[F, Throwable]
-              .fromOption(bytes, Errors.Read.CorruptedDataFile)
-            putValue <- PutCodec.decode(bytes)
-          } yield putValue.value.some
-        }
+        Files[F]
+          .open(filePath, Flags.Read)
+          .adaptErr { case err: java.nio.file.FileSystemException =>
+            Errors.Read.FileSystem(err)
+          }
+          .use { fh =>
+            for {
+              bytes <- fh.read(numBytes = entrySize, offset = positionInFile)
+              bytes <- ApplicativeError[F, Throwable]
+                .fromOption(bytes, Errors.Read.CorruptedDataFile)
+              _ <- ApplicativeError[F, Throwable]
+                .raiseWhen(bytes.size != entrySize)(
+                  Errors.Read.CorruptedDataFile
+                )
+              putValue <- PutCodec.decode(bytes)
+            } yield putValue.value.some
+          }
 
       case None =>
         none[Value].pure[F]

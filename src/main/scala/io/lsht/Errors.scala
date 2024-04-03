@@ -1,6 +1,7 @@
 package io.lsht
 
-import scala.concurrent.CancellationException
+import cats.syntax.option.*
+
 import scala.util.control.NoStackTrace
 
 object Errors {
@@ -11,19 +12,23 @@ object Errors {
     object PathNotADirectory extends StartupException with NoStackTrace
   }
 
-  class ReadException extends Throwable
+  class ReadException(cause: Option[Throwable]) extends Throwable(cause.orNull)
 
   object Read {
-    object BadChecksum extends ReadException with NoStackTrace
+    object BadChecksum extends ReadException(cause = None) with NoStackTrace
 
-    object CorruptedDataFile extends ReadException with NoStackTrace
+    object CorruptedDataFile extends ReadException(cause = None) with NoStackTrace
+
+    final case class FileSystem(cause: java.nio.file.FileSystemException)
+        extends ReadException(cause.some)
+        with NoStackTrace
   }
 
-  class WriteException(cause: Throwable) extends Throwable(cause)
+  class WriteException(cause: Option[Throwable]) extends Throwable(cause.orNull)
 
   object Write {
-    class Failed(cause: Throwable) extends WriteException(cause) with NoStackTrace
-    object Cancelled extends WriteException(new CancellationException with NoStackTrace) with NoStackTrace
-    object CancelledButSavedToDisk extends WriteException(new CancellationException with NoStackTrace) with NoStackTrace
+    class Failed(cause: Throwable) extends WriteException(cause.some) with NoStackTrace
+    object Cancelled extends WriteException(cause = None) with NoStackTrace
+    object CancelledButSavedToDisk extends WriteException(cause = None) with NoStackTrace
   }
 }

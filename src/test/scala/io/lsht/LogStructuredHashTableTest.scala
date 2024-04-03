@@ -3,8 +3,10 @@ package io.lsht
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
-import fs2.io.file.{Files, Flags, Path}
+import fs2.io.file.*
 import weaver.*
+
+import java.nio.file.AccessDeniedException
 
 object LogStructuredHashTableTest extends SimpleIOSuite {
   private val DataFileNamePattern = "data\\.\\d*\\.db"
@@ -120,7 +122,6 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   }
 
   test("Database validates checksum") {
-    // TODO: does it make sense to use different Checksums depending on the length of data? Is there different performance?
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
         val key = "key".getBytes
@@ -131,12 +132,99 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
           dataFile <- Files[IO].list(dir).compile.lastOrError
           bytes <- Files[IO].readAll(dataFile).compile.to(Array)
           bytes <- IO(bytes.updated(bytes.length - 1, 1.toByte))
-          // Read corrupted value
           _ <- Files[IO]
             .writeCursor(dataFile, Flags.Write)
             .use(_.write(Chunk.array(bytes)))
+          // Read corrupted value
           res <- db.get(key).attempt
-        } yield expect(res.isLeft)
+        } yield matches(res) { case Left(err) =>
+          expect(err == Errors.Read.BadChecksum)
+        }
+      }
+    }
+  }
+
+  test(
+    "Database reports an error if entry was never fully written to file (mimic a crash)"
+  ) {
+    Files[IO].tempDirectory.use { dir =>
+      LogStructuredHashTable[IO](dir).use { db =>
+        val key = "key".getBytes
+        for {
+          // Write initial value
+          _ <- db.put(key, "value".getBytes)
+          // trim entry TODO: truncate?
+          dataFile <- Files[IO].list(dir).compile.lastOrError
+          bytes <- Files[IO].readAll(dataFile).compile.to(Array)
+          bytes <- IO(bytes.dropRight(3))
+          _ <- Files[IO]
+            .writeCursor(dataFile, Flags.Write)
+            .use(_.write(Chunk.array(bytes)))
+          // Read corrupted value
+          res <- db.get(key).attempt
+        } yield matches(res) { case Left(err) =>
+          expect(err == Errors.Read.CorruptedDataFile)
+        }
+      }
+    }
+  }
+
+  test("Database reports an error if file is empty") {
+    Files[IO].tempDirectory.use { dir =>
+      LogStructuredHashTable[IO](dir).use { db =>
+        val key = "key".getBytes
+        for {
+          // Write initial value
+          _ <- db.put(key, "value".getBytes)
+          // Corrupt value
+          dataFile <- Files[IO].list(dir).compile.lastOrError
+          _ <- Files[IO].open(dataFile, Flags.Write).use(_.truncate(0))
+          // Read corrupted value
+          res <- db.get(key).attempt
+        } yield matches(res) { case Left(err) =>
+          expect(err == Errors.Read.CorruptedDataFile)
+        }
+      }
+    }
+  }
+
+  test("Database reports an error if file is missing") {
+    Files[IO].tempDirectory.use { dir =>
+      LogStructuredHashTable[IO](dir).use { db =>
+        val key = "key".getBytes
+        for {
+          // Write initial value
+          _ <- db.put(key, "value".getBytes)
+          // Corrupt value
+          dataFile <- Files[IO].list(dir).compile.lastOrError
+          _ <- Files[IO].delete(dataFile)
+          // Read corrupted value
+          res <- db.get(key).attempt
+        } yield matches(res) { case Left(Errors.Read.FileSystem(err: NoSuchFileException)) =>
+          expect(err.getFile === dataFile.toString)
+        }
+      }
+    }
+  }
+
+  test("Database reports an error if file permissions changed") {
+    Files[IO].tempDirectory.use { dir =>
+      LogStructuredHashTable[IO](dir).use { db =>
+        val key = "key".getBytes
+        for {
+          // Write initial value
+          _ <- db.put(key, "value".getBytes)
+          // Change permissions
+          dataFile <- Files[IO].list(dir).compile.lastOrError
+          _ <- Files[IO].setPosixPermissions(
+            dataFile,
+            PosixPermissions(PosixPermission.OwnerWrite)
+          )
+          // Read
+          res <- db.get(key).attempt
+        } yield matches(res) { case Left(Errors.Read.FileSystem(err: AccessDeniedException)) =>
+          expect(err.getFile === dataFile.toString)
+        }
       }
     }
   }
