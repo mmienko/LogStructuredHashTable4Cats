@@ -70,7 +70,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         val value = "value".getBytes
         for {
           uuids <- IO.randomUUID.replicateA(100)
-          ids = uuids.map(_.toString.getBytes).map(Key)
+          ids = uuids.map(_.toString.getBytes).map(Key.apply)
           gets <- ids.parTraverse(db.get)
           _ <- gets
             .map(res => expect(res.isEmpty))
@@ -89,7 +89,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       val value = "value".getBytes
       for {
         uuids <- IO.randomUUID.replicateA(100)
-        ids = uuids.map(_.toString.getBytes).map(Key)
+        ids = uuids.map(_.toString.getBytes).map(Key.apply)
         _ <- fs2.Stream
           .evals(ids.pure[IO])
           .chunkN(20)

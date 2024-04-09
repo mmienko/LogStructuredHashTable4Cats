@@ -31,7 +31,7 @@ class LogStructuredHashTable[F[_]: Async] private (
                 .raiseWhen(bytes.size != entrySize)(
                   Errors.Read.CorruptedDataFile
                 )
-              putValue <- PutCodec.decode(bytes)
+              putValue <- KeyValueEntryCodec.decode(bytes)
             } yield putValue.value.some
           }
 
@@ -135,19 +135,19 @@ object LogStructuredHashTable {
               index <- Ref[F].of(Map.empty[Key, EntryFileReference])
               _ <- Files[F]
                 .readAll(writerFile)
-                .through(PutCodec.decode[F])
+                .through(KeyValueEntryCodec.decode[F])
                 .evalMap {
                   case (Left(err), offset) =>
                     Console[F].println(err.toString + s" at offset $offset")
 
-                  case (Right(put), offset) =>
+                  case (Right(entry), offset) =>
                     index.update(
                       _.updated(
-                        put.key,
+                        entry.key,
                         EntryFileReference(
                           writerFile,
                           positionInFile = offset,
-                          entrySize = PutCodec.MetaDataByteSize + put.dataSize
+                          entrySize = KeyValueEntryCodec.MetaDataByteSize + entry.size
                         )
                       )
                     )
@@ -236,7 +236,7 @@ object LogStructuredHashTable {
 
     for {
       // Encode Key-Value Pair
-      bytes <- guarantee(PutCodec.encode(putCmd.put))(
+      bytes <- guarantee(KeyValueEntryCodec.encode(putCmd.keyValueEntry))(
         onCancel = Errors.Write.Cancelled
       )
 

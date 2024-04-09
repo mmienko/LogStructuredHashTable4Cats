@@ -7,10 +7,10 @@ import fs2._
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
 
-object PutCodec {
+object KeyValueEntryCodec {
 
   type Offset = Long
-  type ParsedKeyValueEntry = (Either[Throwable, Put], Offset)
+  type ParsedKeyValueEntry = (Either[Throwable, KeyValueEntry], Offset)
   private type KeySize = Int
   private type ValueSize = Int
   private type MetaData = (Offset, KeySize, ValueSize, Chunk[Byte])
@@ -21,18 +21,18 @@ object PutCodec {
     4 // 4-byte Value Size
   // TODO?:    4 + // 4-byte Timestamp
 
-  def encode[F[_]: Sync](put: Put): F[ByteBuffer] = {
-    val totalSize = MetaDataByteSize + put.dataSize
+  def encode[F[_]: Sync](entry: KeyValueEntry): F[ByteBuffer] = {
+    val totalSize = MetaDataByteSize + entry.size
 
     for {
       bb <- Sync[F].delay(
         ByteBuffer
           .allocate(totalSize)
           .putInt(0) // zero out CRC
-          .putInt(put.key.length)
-          .putInt(put.value.length)
-          .put(put.key.value)
-          .put(put.value)
+          .putInt(entry.key.length)
+          .putInt(entry.value.length)
+          .put(entry.key.value)
+          .put(entry.value)
           .rewind()
       )
 
@@ -56,7 +56,7 @@ object PutCodec {
     } yield bb
   }
 
-  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[Put] = Sync[F].delay {
+  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[KeyValueEntry] = Sync[F].delay {
     val bb = bytes.toByteBuffer
     val checksum = bb.getInt
 
@@ -71,7 +71,7 @@ object PutCodec {
     val value = Array.fill(valueSize)(0.toByte)
     bb.get(value)
 
-    Put(Key(key), value)
+    KeyValueEntry(Key(key), value)
   }
 
   def decode[F[_]: Sync]: Pipe[F, Byte, ParsedKeyValueEntry] = {
