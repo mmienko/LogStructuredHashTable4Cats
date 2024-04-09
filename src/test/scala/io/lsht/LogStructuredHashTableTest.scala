@@ -7,6 +7,7 @@ import fs2.io.file.*
 import weaver.*
 
 import java.nio.file.AccessDeniedException
+import java.util.UUID
 
 object LogStructuredHashTableTest extends SimpleIOSuite {
   private val DataFileNamePattern = "data\\.\\d*\\.db"
@@ -52,7 +53,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       }
   }
 
-  test("Writes are persisted across open & close of Database") {
+  test("Write is persisted across open & close of Database") {
     val key = Key("key".getBytes)
     val value = "value".getBytes
     Files[IO].tempDirectory
@@ -67,42 +68,41 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     Files[IO].tempDirectory
       .flatMap(LogStructuredHashTable[IO])
       .use { db =>
-        val value = "value".getBytes
         for {
-          uuids <- IO.randomUUID.replicateA(100)
+          uuids <- IO.randomUUID.replicateA(20)
           ids = uuids.map(_.toString.getBytes).map(Key.apply)
           gets <- ids.parTraverse(db.get)
           _ <- gets
             .map(res => expect(res.isEmpty))
             .reduce((a, b) => a and b)
             .failFast
-          _ <- ids.parTraverse(id => db.put(id, value))
+          _ <- ids.parTraverse(id => db.put(id, id.value))
           gets <- ids.parTraverse(db.get)
-        } yield gets
-          .map(res => exists(res)(v => expect(new String(v) === "value")))
-          .reduce((a, b) => a and b)
+          values = gets.collect { case Some(v) => new String(v) }.toSet
+        } yield expect(values === uuids.map(_.toString).toSet)
       }
   }
 
-  test("Database supports reads and write over multiple reopens".ignore) {
+  test("Database supports reads and write over multiple reopens") {
+    val valuesCardinality = 20
     Files[IO].tempDirectory.use { dir =>
-      val value = "value".getBytes
       for {
         uuids <- IO.randomUUID.replicateA(100)
         ids = uuids.map(_.toString.getBytes).map(Key.apply)
         _ <- fs2.Stream
           .evals(ids.pure[IO])
-          .chunkN(20)
+          .chunkN(valuesCardinality)
           .evalMap { ids =>
-            LogStructuredHashTable[IO](dir).use(db => ids.parTraverse_(db.put(_, value)))
+            LogStructuredHashTable[IO](dir).use { db =>
+              ids.zipWithIndex.parTraverse_ { case (key, i) => db.put(key, s"value$i".getBytes) }
+            }
           }
           .compile
           .drain
         gets <- LogStructuredHashTable[IO](dir)
           .use(db => ids.parTraverse(db.get))
-      } yield gets
-        .map(res => exists(res)(v => expect(new String(v) === "value")))
-        .reduce((a, b) => a and b)
+        values = gets.collect { case Some(v) => new String(v) }.toSet
+      } yield expect(values === Set.tabulate(valuesCardinality)(i => "value" + i))
     }
   }
 

@@ -3,10 +3,16 @@ package io.lsht
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
 
+import java.util
+
 final case class Key(value: Array[Byte]) extends AnyVal {
   def length: Int = value.length
+
+  // TODO: unit test this
   override def equals(obj: Any): Boolean =
-    canEqual(obj) || (obj.isInstanceOf[Array[Byte]] && obj.asInstanceOf[Array[Byte]].sameElements(value))
+    obj.isInstanceOf[Key] && obj.asInstanceOf[Key].value.sameElements(value)
+
+  override def hashCode(): Int = util.Arrays.hashCode(value)
 }
 
 type Value = Array[Byte]
