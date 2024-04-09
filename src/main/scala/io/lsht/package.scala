@@ -8,7 +8,6 @@ import java.util
 final case class Key(value: Array[Byte]) extends AnyVal {
   def length: Int = value.length
 
-  // TODO: unit test this
   override def equals(obj: Any): Boolean =
     obj.isInstanceOf[Key] && obj.asInstanceOf[Key].value.sameElements(value)
 
