@@ -86,63 +86,97 @@ object LogStructuredHashTable {
   // TODO: s/Console/Logger
   def apply[F[_]: Async: Console](
       directory: Path
-  ): Resource[F, LogStructuredHashTable[F]] =
-    for {
-      _ <- Resource.eval(verifyPathIsDirectory[F](directory))
+  ): Resource[F, LogStructuredHashTable[F]] = {
+    Resource.suspend {
+      for {
+        _ <- verifyPathIsDirectory[F](directory)
 
-      files <- Resource.eval(getFiles(directory))
-
-      db <- files.sortBy(_.fileName.toString).toList match {
-        case ::(head, next) =>
+        files <- getFiles(directory)
+      } yield files.sortBy(_.fileName.toString).toList match {
+        case writerFile :: otherFiles =>
           /*
-          Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use
-          a timestamp to differentiate between the two. As a matter of fact, on each new startup, simply create a new
-          "active writer file", and let the previous "active writer file" be an "older data files". Compaction will
-          handle cleaning up the files.
+        Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use
+        a timestamp to differentiate between the two. As a matter of fact, on each new startup, simply create a new
+        "active writer file", and let the previous "active writer file" be an "older data files". Compaction will
+        handle cleaning up the files.
 
-          The database is opened after a clean close. Therefore,
-            -- there is an active writer file
-            -- there *may* be older data files
-            -- there *may* be merged data files w/ corresponding hint files
-          If there are merged data files and older data files, then older data files should take precedence
-          as they could contain the latest values for keys. So precedence order is
-          "active file" > "older data file" > "merged data file".
+        The database is opened after a clean close. Therefore,
+          -- there is an active writer file
+          -- there *may* be older data files
+          -- there *may* be merged data files w/ corresponding hint files
+        If there are merged data files and older data files, then older data files should take precedence
+        as they could contain the latest values for keys. So precedence order is
+        "active file" > "older data file" > "merged data file".
 
-          The database is opened after a crash close. Therefore,
-            -- compaction is incomplete
-              -- hint file was created but not corresponding merged values files, or vice versa.
-              -- "merged data file" was created but "older data files" were not deleted.
-              -- This could be solved with Write-Ahead-Intent-Log to disambiguate?
-            -- a write is incomplete
-              -- N/A CRC will check, then it should be marked for deletion to clean upon merge.
-            -- an active writer file rotation is incomplete
-              -- This could be solved with Alternating-Bit (or timestamp) to discern which file is latest. Or even
-                 by file size.
-            -- still empty as it closed after being created
-          and a repair process is needed.
+        The database is opened after a crash close. Therefore,
+          -- compaction is incomplete
+            -- hint file was created but not corresponding merged values files, or vice versa.
+            -- "merged data file" was created but "older data files" were not deleted.
+            -- This could be solved with Write-Ahead-Intent-Log to disambiguate?
+          -- a write is incomplete
+            -- N/A CRC will check, then it should be marked for deletion to clean upon merge.
+          -- an active writer file rotation is incomplete
+            -- This could be solved with Alternating-Bit (or timestamp) to discern which file is latest. Or even
+               by file size.
+          -- still empty as it closed after being created
+        and a repair process is needed.
 
-          TODO: Can this be made into a TLA+ spec?
+        TODO: Can this be made into a TLA+ spec?
            */
-          // TODO: Support
-          createNewDatabase(directory)
+          // TODO: for big files, can we create pointers to different points to read in parallel, this would speedup
+          //  start times. So first few bytes of file would contain a pointer to another spot in file, only needed
+          //  for large files. There is a readRage
+          // TODO: Resource.force/suspend ?
+          Resource.suspend {
+            for {
+              _ <- ApplicativeError[F, Throwable].raiseUnless(otherFiles.isEmpty)(
+                new UnsupportedOperationException("Assuming no file rotation")
+              )
+              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
+              _ <- Files[F]
+                .readAll(writerFile)
+                .through(PutCodec.decode[F])
+                .evalMap {
+                  case (Left(err), offset) =>
+                    Console[F].println(err.toString + s" at offset $offset")
+
+                  case (Right(put), offset) =>
+                    index.update(
+                      _.updated(
+                        put.key,
+                        EntryFileReference(
+                          writerFile,
+                          positionInFile = offset,
+                          entrySize = PutCodec.MetaDataByteSize + put.dataSize
+                        )
+                      )
+                    )
+                }
+                .compile
+                .drain
+            } yield runDatabase(writerFile, index)
+          }
 
         case Nil =>
           // new DB
-          createNewDatabase(directory)
+          Resource.suspend {
+            for {
+              now <- Clock[F].realTime
+
+              writerFile = directory / s"data.${now.toMillis.toString}.db"
+
+              // TODO: what happens if file already exists? B/c two programs are running?
+              _ <- Files[F].createFile(writerFile)
+
+              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
+            } yield runDatabase(writerFile, index)
+          }
       }
-    } yield db
+    }
+  }
 
-  private def createNewDatabase[F[_]: Async: Console: Clock](directory: Path) =
+  private def runDatabase[F[_]: Async: Console: Clock](writerFile: Path, index: Ref[F, Map[Key, EntryFileReference]]) =
     for {
-      now <- Resource.eval(Clock[F].realTime)
-
-      writerFile = directory / s"data.${now.toMillis.toString}.db"
-
-      // TODO: what happens if file already exists? B/c two programs are running?
-      _ <- Resource.eval(Files[F].createFile(writerFile))
-
-      index <- Resource.eval(Ref[F].of(Map.empty[Key, EntryFileReference]))
-
       queue <- Resource.eval(Queue.unbounded[F, PutCommand[F]])
 
       seriallyExecuteWrites = MonadCancel[F].guaranteeCase(

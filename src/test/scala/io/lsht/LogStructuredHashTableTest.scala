@@ -24,7 +24,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     }).use(IO.pure)
   }
 
-  test("Database can be re-opened".ignore) {
+  test("Database can be re-opened") {
     Files[IO].tempDirectory
       .use { dir =>
         LogStructuredHashTable[IO](dir).use_ *>
@@ -41,7 +41,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     Files[IO].tempDirectory
       .flatMap(LogStructuredHashTable[IO])
       .use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         val value = "value".getBytes
         for {
           res <- db.get(key)
@@ -52,8 +52,8 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       }
   }
 
-  test("Writes are persisted across open & close of Database".ignore) {
-    val key = "key".getBytes
+  test("Writes are persisted across open & close of Database") {
+    val key = Key("key".getBytes)
     val value = "value".getBytes
     Files[IO].tempDirectory
       .use { dir =>
@@ -70,7 +70,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         val value = "value".getBytes
         for {
           uuids <- IO.randomUUID.replicateA(100)
-          ids = uuids.map(_.toString.getBytes)
+          ids = uuids.map(_.toString.getBytes).map(Key)
           gets <- ids.parTraverse(db.get)
           _ <- gets
             .map(res => expect(res.isEmpty))
@@ -89,7 +89,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       val value = "value".getBytes
       for {
         uuids <- IO.randomUUID.replicateA(100)
-        ids = uuids.map(_.toString.getBytes)
+        ids = uuids.map(_.toString.getBytes).map(Key)
         _ <- fs2.Stream
           .evals(ids.pure[IO])
           .chunkN(20)
@@ -110,7 +110,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     Files[IO].tempDirectory
       .flatMap(LogStructuredHashTable[IO])
       .use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         val value1 = "value1".getBytes
         val value2 = "value2".getBytes
         for {
@@ -124,7 +124,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   test("Database validates checksum") {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)
@@ -149,7 +149,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   ) {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)
@@ -172,7 +172,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   test("Database reports an error if file is empty") {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)
@@ -191,7 +191,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   test("Database reports an error if file is missing") {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)
@@ -210,7 +210,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   test("Database reports an error if file permissions changed") {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).use { db =>
-        val key = "key".getBytes
+        val key = Key("key".getBytes)
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)

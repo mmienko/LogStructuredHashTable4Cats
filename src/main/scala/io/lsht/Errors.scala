@@ -10,6 +10,8 @@ object Errors {
 
   object Startup {
     object PathNotADirectory extends StartupException with NoStackTrace
+    object BadChecksum extends StartupException with NoStackTrace
+    object MissingKeyValueEntry extends StartupException with NoStackTrace
   }
 
   class ReadException(cause: Option[Throwable]) extends Throwable(cause.orNull)

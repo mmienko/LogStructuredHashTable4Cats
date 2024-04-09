@@ -3,6 +3,7 @@ package io.lsht
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
+import io.lsht.PutCodec.Offset
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -14,7 +15,7 @@ object PutCodecTest extends SimpleIOSuite {
   private val KeyAndValueSizesSize = 8
 
   test("Encode Put with non-empty key and non-empty value") {
-    val put = Put("key1".getBytes, "value1".getBytes)
+    val put = Put(Key("key1".getBytes), "value1".getBytes)
 
     val KeySize = 4
     val ValueSize = 6
@@ -43,7 +44,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with non-empty key but empty value") {
-    val put = Put("key1".getBytes, "".getBytes)
+    val put = Put(Key("key1".getBytes), "".getBytes)
 
     val KeySize = 4
     val ValueSize = 0
@@ -72,7 +73,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with empty key but non-empty value") {
-    val put = Put("".getBytes, "value1".getBytes)
+    val put = Put(Key("".getBytes), "value1".getBytes)
 
     val KeySize = 0
     val ValueSize = 6
@@ -101,7 +102,7 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Encode Put with empty key and empty value") {
-    val put = Put("".getBytes, "".getBytes)
+    val put = Put(Key("".getBytes), "".getBytes)
 
     val KeySize = 0
     val ValueSize = 0
@@ -130,59 +131,59 @@ object PutCodecTest extends SimpleIOSuite {
   }
 
   test("Decode bytes of non-empty key and non-empty value") {
-    val put = Put("key1".getBytes, "value1".getBytes)
+    val put = Put(Key("key1".getBytes), "value1".getBytes)
 
     PutCodec
       .encode(put)
       .map(Chunk.byteBuffer)
       .flatMap(PutCodec.decode)
       .map { putValue =>
-        expect(new String(putValue.key) === "key1") and
+        expect(new String(putValue.key.value) === "key1") and
           expect(new String(putValue.value) === "value1")
       }
   }
 
   test("Decode bytes of non-empty key but empty value") {
-    val put = Put("key1".getBytes, "".getBytes)
+    val put = Put(Key("key1".getBytes), "".getBytes)
 
     PutCodec
       .encode(put)
       .map(Chunk.byteBuffer)
       .flatMap(PutCodec.decode)
       .map { putValue =>
-        expect(new String(putValue.key) === "key1") and
+        expect(new String(putValue.key.value) === "key1") and
           expect(new String(putValue.value) === "")
       }
   }
 
   test("Decode bytes of empty key but non-empty value") {
-    val put = Put("".getBytes, "value1".getBytes)
+    val put = Put(Key("".getBytes), "value1".getBytes)
 
     PutCodec
       .encode(put)
       .map(Chunk.byteBuffer)
       .flatMap(PutCodec.decode)
       .map { putValue =>
-        expect(new String(putValue.key) === "") and
+        expect(new String(putValue.key.value) === "") and
           expect(new String(putValue.value) === "value1")
       }
   }
 
   test("Decode bytes of empty key and empty value") {
-    val put = Put("".getBytes, "".getBytes)
+    val put = Put(Key("".getBytes), "".getBytes)
 
     PutCodec
       .encode(put)
       .map(Chunk.byteBuffer)
       .flatMap(PutCodec.decode)
       .map { putValue =>
-        expect(new String(putValue.key) === "") and
+        expect(new String(putValue.key.value) === "") and
           expect(new String(putValue.value) === "")
       }
   }
 
   test("Decode fails if checksum does not match") {
-    val put = Put("key1".getBytes, "value1".getBytes)
+    val put = Put(Key("key1".getBytes), "value1".getBytes)
 
     for {
       bytes <- PutCodec.encode(put)
@@ -196,6 +197,53 @@ object PutCodecTest extends SimpleIOSuite {
     } yield matches(res) { case Left(error) =>
       expect(error == Errors.Read.BadChecksum)
     }
+  }
+
+  test("decode stream of bytes for a single put") {
+    val put = Put(Key("key1".getBytes), "value1".getBytes)
+
+    fs2.Stream
+      .evalUnChunk(PutCodec.encode(put).map(Chunk.byteBuffer))
+      .through(PutCodec.decode)
+      .compile
+      .lastOrError
+      .map { case (result, offset) =>
+        matches(result) { case Right(putValue) =>
+          expect(new String(putValue.key.value) === "key1") and
+            expect(new String(putValue.value) === "value1")
+        } and expect(offset === 0)
+      }
+  }
+
+  test("decode stream of bytes for multiple puts") {
+    val put1 = Put(Key("key1".getBytes), "value1".getBytes)
+    val put2 = Put(Key("key2".getBytes), "value2".getBytes)
+    val put3 = Put(Key("key3".getBytes), "value3".getBytes)
+
+    def stream(put: Put) = fs2.Stream.evalUnChunk(PutCodec.encode(put).map(Chunk.byteBuffer))
+
+    (stream(put1) ++ stream(put2) ++ stream(put3))
+      .through(PutCodec.decode)
+      .compile
+      .toList
+      .map {
+        case (res1, o1) :: (res2, o2) :: (res3, o3) :: Nil =>
+          matches(res1) { case Right(putValue) =>
+            expect(new String(putValue.key.value) === "key1") and
+              expect(new String(putValue.value) === "value1")
+          } and expect(o1 === 0) and
+            matches(res2) { case Right(putValue) =>
+              expect(new String(putValue.key.value) === "key2") and
+                expect(new String(putValue.value) === "value2")
+            } and expect(o2 === (ChecksumSize + KeyAndValueSizesSize + 10)) and
+            matches(res3) { case Right(putValue) =>
+              expect(new String(putValue.key.value) === "key3") and
+                expect(new String(putValue.value) === "value3")
+            } and expect(o3 === ((ChecksumSize + KeyAndValueSizesSize + 10) * 2))
+
+        case x =>
+          failure(s"Expecting 3 results, but instead got ${x.size}")
+      }
   }
 
   private def getString(bytes: Int)(byteBuffer: ByteBuffer): String = {

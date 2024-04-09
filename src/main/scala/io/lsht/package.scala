@@ -3,7 +3,12 @@ package io.lsht
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
 
-type Key = Array[Byte]
+case class Key(value: Array[Byte]) extends AnyVal {
+  def length: Int = value.length
+  override def equals(obj: Any): Boolean =
+    canEqual(obj) || (obj.isInstanceOf[Array[Byte]] && obj.asInstanceOf[Array[Byte]].sameElements(value))
+}
+
 type Value = Array[Byte]
 
 private type PutResult = Unit | Throwable

@@ -2,12 +2,20 @@ package io.lsht
 
 import cats.effect.Sync
 import cats.implicits.*
-import fs2.Chunk
+import fs2._
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
 
 object PutCodec {
+
+  type Offset = Long
+  type ParsedKeyValueEntry = (Either[Throwable, Put], Offset)
+  private type KeySize = Int
+  private type ValueSize = Int
+  private type MetaData = (Offset, KeySize, ValueSize, Chunk[Byte])
+
+  // TODO: header byte size : header include the following metadata. Can also be private
   val MetaDataByteSize: Int = 4 + // 4-byte CRC
     4 + // 4-byte Key Size
     4 // 4-byte Value Size
@@ -23,7 +31,7 @@ object PutCodec {
           .putInt(0) // zero out CRC
           .putInt(put.key.length)
           .putInt(put.value.length)
-          .put(put.key)
+          .put(put.key.value)
           .put(put.value)
           .rewind()
       )
@@ -63,7 +71,45 @@ object PutCodec {
     val value = Array.fill(valueSize)(0.toByte)
     bb.get(value)
 
-    Put(key, value)
+    Put(Key(key), value)
   }
 
+  def decode[F[_]: Sync]: Pipe[F, Byte, ParsedKeyValueEntry] = {
+    def go(s: fs2.Stream[F, (Byte, Long)], metaData: Option[MetaData]): Pull[F, ParsedKeyValueEntry, Unit] = {
+      metaData match
+        case None =>
+          s.pull.unconsN(MetaDataByteSize).flatMap {
+            // Start of the stream || start of new key-value entry TODO: rename Put to KVEntry/KVPair?
+            case Some((metadataBytesWithOffset, tail)) =>
+              val offset: Offset = metadataBytesWithOffset.head.get._2
+              val metadataBytes = metadataBytesWithOffset.map(_._1)
+              val bb = metadataBytes.toByteBuffer
+              val _ = bb.getInt // skip crc until full key-value entry is extracted
+              val keySize: KeySize = bb.getInt
+              val valueSize: ValueSize = bb.getInt
+              go(tail, metaData = (offset, keySize, valueSize, metadataBytes).some)
+
+            // Cleanly finished the stream
+            case None =>
+              Pull.done
+          }
+
+        case Some((offset, keySize, valueSize, metadataBytes)) =>
+          s.pull.unconsN(keySize + valueSize).flatMap {
+            // Given MetaData, read the actual key-value data
+            case Some((entryBytesWithOffset, tail)) =>
+              Pull
+                .eval(decode(metadataBytes ++ entryBytesWithOffset.map(_._1)))
+                .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
+                .attempt
+                .flatMap(put => Pull.output1((put, offset))) >> go(tail, metaData = None)
+
+            // MetaData is present, but NOT the key-value data, which means stream was corrupted.
+            case None =>
+              Pull.raiseError(Errors.Startup.MissingKeyValueEntry)
+          }
+    }
+
+    in => go(in.zipWithIndex, metaData = None).stream
+  }
 }
