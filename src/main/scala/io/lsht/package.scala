@@ -20,6 +20,11 @@ object Key {
 
 type Value = Array[Byte]
 
+protected val CommonHeaderSize: Int = 4 + // 4-byte CRC
+  1 + // 1-byte MetaData, first bit is boolean tombstone
+  4 // 4-byte Key Size
+// TODO?:    4 + // 4-byte Timestamp
+
 private type PutResult = Unit | Throwable
 
 private final case class KeyValueEntry(key: Key, value: Value) {

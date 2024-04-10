@@ -149,7 +149,7 @@ object LogStructuredHashTable {
               index <- Ref[F].of(Map.empty[Key, EntryFileReference])
               _ <- Files[F]
                 .readAll(writerFile)
-                .through(KeyValueEntryCodec.decode[F])
+                .through(DataFileDecoder.decode[F])
                 .evalMap {
                   case (Left(err), offset) =>
                     Console[F].println(err.toString + s" at offset $offset")
@@ -161,7 +161,7 @@ object LogStructuredHashTable {
                         EntryFileReference(
                           writerFile,
                           positionInFile = offset,
-                          entrySize = KeyValueEntryCodec.HeaderSize + entry.size
+                          entrySize = KeyValueEntryCodec.size(entry)
                         )
                       )
                     )
