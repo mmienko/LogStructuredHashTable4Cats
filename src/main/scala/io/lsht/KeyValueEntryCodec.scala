@@ -13,16 +13,15 @@ object KeyValueEntryCodec {
   type ParsedKeyValueEntry = (Either[Throwable, KeyValueEntry], Offset)
   private type KeySize = Int
   private type ValueSize = Int
-  private type MetaData = (Offset, KeySize, ValueSize, Chunk[Byte])
+  private type Header = (Offset, KeySize, ValueSize, Chunk[Byte])
 
-  // TODO: header byte size : header include the following metadata. Can also be private
-  val MetaDataByteSize: Int = 4 + // 4-byte CRC
+  val HeaderSize: Int = 4 + // 4-byte CRC
     4 + // 4-byte Key Size
     4 // 4-byte Value Size
   // TODO?:    4 + // 4-byte Timestamp
 
   def encode[F[_]: Sync](entry: KeyValueEntry): F[ByteBuffer] = {
-    val totalSize = MetaDataByteSize + entry.size
+    val totalSize = HeaderSize + entry.size
 
     for {
       bb <- Sync[F].delay(
@@ -75,41 +74,41 @@ object KeyValueEntryCodec {
   }
 
   def decode[F[_]: Sync]: Pipe[F, Byte, ParsedKeyValueEntry] = {
-    def go(s: fs2.Stream[F, (Byte, Long)], metaData: Option[MetaData]): Pull[F, ParsedKeyValueEntry, Unit] = {
-      metaData match
+    def go(s: fs2.Stream[F, (Byte, Long)], header: Option[Header]): Pull[F, ParsedKeyValueEntry, Unit] = {
+      header match
         case None =>
-          s.pull.unconsN(MetaDataByteSize).flatMap {
-            // Start of the stream || start of new key-value entry TODO: rename Put to KVEntry/KVPair?
-            case Some((metadataBytesWithOffset, tail)) =>
-              val offset: Offset = metadataBytesWithOffset.head.get._2
-              val metadataBytes = metadataBytesWithOffset.map(_._1)
-              val bb = metadataBytes.toByteBuffer
+          s.pull.unconsN(HeaderSize).flatMap {
+            // Start of the stream || start of new key-value entry?
+            case Some((headerBytesWithOffset, tail)) =>
+              val offset: Offset = headerBytesWithOffset.head.get._2
+              val headerBytes = headerBytesWithOffset.map(_._1)
+              val bb = headerBytes.toByteBuffer
               val _ = bb.getInt // skip crc until full key-value entry is extracted
               val keySize: KeySize = bb.getInt
               val valueSize: ValueSize = bb.getInt
-              go(tail, metaData = (offset, keySize, valueSize, metadataBytes).some)
+              go(tail, header = (offset, keySize, valueSize, headerBytes).some)
 
             // Cleanly finished the stream
             case None =>
               Pull.done
           }
 
-        case Some((offset, keySize, valueSize, metadataBytes)) =>
+        case Some((offset, keySize, valueSize, headerBytes)) =>
           s.pull.unconsN(keySize + valueSize).flatMap {
-            // Given MetaData, read the actual key-value data
+            // Given Header, read the actual key-value data
             case Some((entryBytesWithOffset, tail)) =>
               Pull
-                .eval(decode(metadataBytes ++ entryBytesWithOffset.map(_._1)))
+                .eval(decode(headerBytes ++ entryBytesWithOffset.map(_._1)))
                 .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
                 .attempt
-                .flatMap(put => Pull.output1((put, offset))) >> go(tail, metaData = None)
+                .flatMap(put => Pull.output1((put, offset))) >> go(tail, header = None)
 
-            // MetaData is present, but NOT the key-value data, which means stream was corrupted.
+            // Header is present, but NOT the key-value data, which means stream was corrupted.
             case None =>
               Pull.raiseError(Errors.Startup.MissingKeyValueEntry)
           }
     }
 
-    in => go(in.zipWithIndex, metaData = None).stream
+    in => go(in.zipWithIndex, header = None).stream
   }
 }

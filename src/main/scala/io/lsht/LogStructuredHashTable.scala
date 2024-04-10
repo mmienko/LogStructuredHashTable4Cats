@@ -147,7 +147,7 @@ object LogStructuredHashTable {
                         EntryFileReference(
                           writerFile,
                           positionInFile = offset,
-                          entrySize = KeyValueEntryCodec.MetaDataByteSize + entry.size
+                          entrySize = KeyValueEntryCodec.HeaderSize + entry.size
                         )
                       )
                     )
