@@ -14,6 +14,10 @@ final case class Key(value: Array[Byte]) extends AnyVal {
   override def hashCode(): Int = util.Arrays.hashCode(value)
 }
 
+object Key {
+  def apply(string: String): Key = new Key(string.getBytes)
+}
+
 type Value = Array[Byte]
 
 private type PutResult = Unit | Throwable

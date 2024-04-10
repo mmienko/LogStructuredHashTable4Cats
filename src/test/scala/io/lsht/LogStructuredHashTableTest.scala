@@ -225,4 +225,17 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     }
   }
 
+  test("leak".only) {
+    Files[IO].tempDirectory.use { dir =>
+      LogStructuredHashTable[IO](dir).allocated
+        .flatMap { case (db, close) => close.as(db) }
+        .flatMap(db => db.put(Key("key"), "value".getBytes).attempt)
+        .map(res =>
+          matches(res) { case Left(t: IllegalStateException) =>
+            expect(t.getMessage === "Resource leak, db is closed and this method should not be called")
+          }
+        )
+    }
+  }
+
 }

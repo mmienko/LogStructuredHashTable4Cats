@@ -10,7 +10,8 @@ import io.lsht.LogStructuredHashTable.*
 
 class LogStructuredHashTable[F[_]: Async] private (
     queue: QueueSink[F, PutCommand[F]],
-    index: Ref[F, Map[Key, EntryFileReference]]
+    index: Ref[F, Map[Key, EntryFileReference]],
+    isClosed: Ref[F, Boolean]
 ) {
 
   def get(key: Key): F[Option[Value]] =
@@ -43,6 +44,7 @@ class LogStructuredHashTable[F[_]: Async] private (
     for {
       cmd <- PutCommand(key, value)
       _ <- queue.offer(cmd)
+      _ <- validateDbIsOpen
       result <- cmd.waitUntilComplete
       _ <- result match {
         case () =>
@@ -79,6 +81,18 @@ class LogStructuredHashTable[F[_]: Async] private (
 
   def foldMap[A: Monoid](func: (Key, Value) => A): F[A] =
     foldMap(initial = Monoid[A].empty)(func)
+
+  /*
+  There is still a race whenever using this method, however it may help catch bugs during improper use of Resource's
+  TODO: Consider removing this
+   */
+  private def validateDbIsOpen =
+    isClosed.get.flatMap(
+      ApplicativeError[F, Throwable].raiseWhen(_)(
+        new IllegalStateException("Resource leak, db is closed and this method should not be called")
+      )
+    )
+
 }
 
 object LogStructuredHashTable {
@@ -179,6 +193,7 @@ object LogStructuredHashTable {
     for {
       queue <- Resource.eval(Queue.unbounded[F, PutCommand[F]])
 
+      cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
       seriallyExecuteWrites = MonadCancel[F].guaranteeCase(
         Stream
           .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
@@ -193,12 +208,15 @@ object LogStructuredHashTable {
           drain(queue).flatMap(_.traverse_(_.complete(e)))
 
         case Outcome.Canceled() =>
-          drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
+          cancelRemainingCommands
       }
+
+      isClosed <- Resource.eval(Ref[F].of(false))
 
       _ <- Supervisor[F](await = false)
         .evalMap(_.supervise(seriallyExecuteWrites))
-    } yield new LogStructuredHashTable(queue, index)
+        .onFinalize(isClosed.set(true) >> cancelRemainingCommands)
+    } yield new LogStructuredHashTable(queue, index, isClosed)
 
   private def verifyPathIsDirectory[F[_]: Async](directory: Path) =
     Files[F]

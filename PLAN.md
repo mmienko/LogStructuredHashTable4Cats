@@ -1,6 +1,5 @@
 1) Add tests for creating a new DB, util to drop db (or eventually a method) which executes after every test.
-   1) concurrent closure with in-progress writes, cancels writes 
-   2) Write and read large values; large keys (is there a max key size?) and values
+   1) Write and read large values; large keys (is there a max key size?) and values
 2) Implement Delete method and add tests. Add some edge case tests around certain usage pattens like deleting everything.
 3) Implement rotating files
 4) Implement compaction
