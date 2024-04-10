@@ -153,13 +153,9 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         for {
           // Write initial value
           _ <- db.put(key, "value".getBytes)
-          // trim entry TODO: truncate?
+          // trim entry
           dataFile <- Files[IO].list(dir).compile.lastOrError
-          bytes <- Files[IO].readAll(dataFile).compile.to(Array)
-          bytes <- IO(bytes.dropRight(3))
-          _ <- Files[IO]
-            .writeCursor(dataFile, Flags.Write)
-            .use(_.write(Chunk.array(bytes)))
+          _ <- Files[IO].open(dataFile, Flags.Write).use(_.truncate(6))
           // Read corrupted value
           res <- db.get(key).attempt
         } yield matches(res) { case Left(err) =>
