@@ -11,6 +11,8 @@ object Errors {
   object Startup {
     object PathNotADirectory extends StartupException with NoStackTrace
     object BadChecksum extends StartupException with NoStackTrace
+    object MissingTombstoneKey extends StartupException with NoStackTrace
+    object MissingValueSize extends StartupException with NoStackTrace
     object MissingKeyValueEntry extends StartupException with NoStackTrace
   }
 

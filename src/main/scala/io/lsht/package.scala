@@ -20,29 +20,41 @@ object Key {
 
 type Value = Array[Byte]
 
-protected val CommonHeaderSize: Int = 4 + // 4-byte CRC
-  1 + // 1-byte MetaData, first bit is boolean tombstone
-  4 // 4-byte Key Size
-// TODO?:    4 + // 4-byte Timestamp
-
 private type PutResult = Unit | Throwable
 
 private final case class KeyValueEntry(key: Key, value: Value) {
   def size: Int = key.length + value.length
 }
 
-private final case class PutCommand[F[_]](
-    keyValueEntry: KeyValueEntry,
-    signal: Deferred[F, PutResult]
-) {
-  def key: Key = keyValueEntry.key
-  def value: Value = keyValueEntry.value
-  def entrySize: Int = keyValueEntry.size
+private sealed abstract class WriteCommand[F[_]](signal: Deferred[F, PutResult]) extends Product with Serializable {
   def waitUntilComplete: F[PutResult] = signal.get
+
   def complete(res: PutResult): F[Boolean] = signal.complete(res)
 }
 
-object PutCommand {
-  def apply[F[_]](key: Key, value: Value)(implicit F: GenConcurrent[F, ?]): F[PutCommand[F]] =
-    Deferred[F, PutResult].map(PutCommand(KeyValueEntry(key, value), _))
+object WriteCommand {
+  final case class Put[F[_]](
+      keyValueEntry: KeyValueEntry,
+      signal: Deferred[F, PutResult]
+  ) extends WriteCommand[F](signal) {
+    def key: Key = keyValueEntry.key
+    def value: Value = keyValueEntry.value
+    def entrySize: Int = keyValueEntry.size
+  }
+
+  object Put {
+    def apply[F[_]](key: Key, value: Value)(implicit F: GenConcurrent[F, ?]): F[Put[F]] =
+      Deferred[F, PutResult].map(Put(KeyValueEntry(key, value), _))
+  }
+
+  final case class Delete[F[_]](
+      key: Key,
+      signal: Deferred[F, PutResult]
+  ) extends WriteCommand[F](signal)
+
+  object Delete {
+    def apply[F[_]](key: Key)(implicit F: GenConcurrent[F, ?]): F[Delete[F]] =
+      Deferred[F, PutResult].map(Delete(key, _))
+  }
+
 }

@@ -1,69 +1,56 @@
 package io.lsht
 
+import cats.ApplicativeError
 import cats.effect.Sync
 import cats.implicits.*
 import fs2.*
 
 import java.nio.ByteBuffer
-import java.util.zip.CRC32C
 
 object KeyValueEntryCodec {
 
-  val HeaderSize: Int = CommonHeaderSize + 4 // 4-byte Value Size
+  val HeaderSize: Int = CodecUtils.CommonHeaderSize + 4 // 4-byte Value Size
 
   def size(entry: KeyValueEntry): Int = HeaderSize + entry.size
-  
+
   def encode[F[_]: Sync](entry: KeyValueEntry): F[ByteBuffer] = {
     val totalSize = size(entry)
 
-    for {
-      bb <- Sync[F].delay(
+    Sync[F]
+      .delay {
         ByteBuffer
           .allocate(totalSize)
           .putInt(0) // zero out CRC
+          .put(0.toByte) // set tombstone to false
           .putInt(entry.key.length)
           .putInt(entry.value.length)
           .put(entry.key.value)
           .put(entry.value)
           .rewind()
-      )
-
-      checksum <- Sync[F].delay {
-        val crc32c = new CRC32C
-        crc32c.update(bb.slice(4, totalSize - 4))
-        crc32c.getValue
       }
-
-      _ <- Sync[F].delay {
-        /*
-        Java's CheckSum returns a long but CRC32C actually returns an integer.
-        Copy the bottom 4 bytes of long (the int part) to the ByteBuffer
-         */
-        var cs: Long = checksum
-        for i <- 0 until 4 do {
-          bb.put(3 - i, (cs & 0xff).toByte)
-          cs >>= 8
-        }
-      }
-    } yield bb
+      .flatTap(CodecUtils.addCrc(_, totalSize))
   }
 
-  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[KeyValueEntry] = Sync[F].delay {
+  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[KeyValueEntry] = Sync[F].defer {
     val bb = bytes.toByteBuffer
     val checksum = bb.getInt
+    val _ = bb.get // skip tombstone
 
-    val crc32c = new CRC32C
-    crc32c.update(bb.slice(4, bytes.size - 4))
-    if crc32c.getValue.toInt != checksum then throw Errors.Read.BadChecksum
+    CodecUtils
+      .isValidCrc(bb, bbSize = bytes.size, checksum)
+      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(Errors.Read.BadChecksum))
+      .flatMap { _ =>
+        Sync[F].delay {
+          val keySize = bb.getInt
+          val valueSize = bb.getInt
+          val key = Array.fill(keySize)(0.toByte)
+          bb.get(key)
+          val value = Array.fill(valueSize)(0.toByte)
+          bb.get(value)
 
-    val keySize = bb.getInt
-    val valueSize = bb.getInt
-    val key = Array.fill(keySize)(0.toByte)
-    bb.get(key)
-    val value = Array.fill(valueSize)(0.toByte)
-    bb.get(value)
-
-    KeyValueEntry(Key(key), value)
+          KeyValueEntry(Key(key), value)
+        }
+      }
   }
 
 }

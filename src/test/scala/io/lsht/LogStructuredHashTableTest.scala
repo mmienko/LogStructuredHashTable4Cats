@@ -225,7 +225,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     }
   }
 
-  test("leak".only) {
+  test("Database Resource leak can be detected") {
     Files[IO].tempDirectory.use { dir =>
       LogStructuredHashTable[IO](dir).allocated
         .flatMap { case (db, close) => close.as(db) }
@@ -238,4 +238,51 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     }
   }
 
+  test("Database has no effect when deleting a key that doesn't exist") {
+    Files[IO].tempDirectory
+      .flatMap(LogStructuredHashTable[IO])
+      .use { db =>
+        db.delete(Key("key1"))
+      }
+      .as(success)
+  }
+
+  test("Database can delete existing keys") {
+    Files[IO].tempDirectory
+      .flatMap(LogStructuredHashTable[IO])
+      .use { db =>
+        val key = Key("key1")
+        db.put(key, "value1".getBytes) *>
+          db.delete(key) *>
+          db.get(key)
+      }
+      .map(result => expect(result.isEmpty))
+  }
+
+  test("Database does not load deleted keys") {
+    Files[IO].tempDirectory
+      .use { dir =>
+        val key1 = Key("key1")
+        val key2 = Key("key2")
+        LogStructuredHashTable[IO](dir).use { db =>
+          db.put(key1, "value1".getBytes) *>
+            db.put(key2, "value2".getBytes) *>
+            db.delete(key1)
+        } *> LogStructuredHashTable[IO](dir)
+          .use { db =>
+            db.get(key1)
+              .flatMap(res1 => db.get(key2).tupleLeft(res1))
+              .flatTap(_ => db.delete(key2))
+          }
+          .flatMap { case (res1, res2) =>
+            (expect(res1.isEmpty) and matches(res2) { case Some(value) =>
+              expect(new String(value) === "value2")
+            }).failFast
+          } *> LogStructuredHashTable[IO](dir)
+          .use { db =>
+            db.get(key2)
+          }
+          .map(res => expect(res.isEmpty))
+      }
+  }
 }

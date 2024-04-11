@@ -3,7 +3,6 @@ package io.lsht
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.KeyValueEntryCodec.Offset
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -12,7 +11,7 @@ import java.util.zip.CRC32C
 object KeyValueEntryCodecTest extends SimpleIOSuite {
 
   private val ChecksumSize = 4
-  private val KeyAndValueSizesSize = 8
+  private val NonCrcHeaderSize = 9
 
   test("Encode KeyValueEntry with non-empty key and non-empty value") {
     val entry = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
@@ -24,11 +23,14 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
       bb <- KeyValueEntryCodec.encode(entry)
 
       crc <- IO(bb.getInt)
-      nonChecksumBytes <- IO(
-        bb.slice(ChecksumSize, KeyAndValueSizesSize + KeySize + ValueSize)
-      )
+      nonChecksumBytes <- IO {
+        bb.slice(ChecksumSize, NonCrcHeaderSize + KeySize + ValueSize)
+      }
       checkSum <- getChecksum(nonChecksumBytes)
       _ <- expect(crc === checkSum).failFast
+
+      tombstone <- IO(bb.get())
+      _ <- expect(tombstone === 0.toByte).failFast
 
       keySize <- IO(bb.getInt)
       _ <- expect(keySize === KeySize).failFast
@@ -53,11 +55,14 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
       bb <- KeyValueEntryCodec.encode(entry)
 
       crc <- IO(bb.getInt)
-      nonChecksumBytes <- IO(
-        bb.slice(ChecksumSize, KeyAndValueSizesSize + KeySize + ValueSize)
-      )
+      nonChecksumBytes <- IO {
+        bb.slice(ChecksumSize, NonCrcHeaderSize + KeySize + ValueSize)
+      }
       checkSum <- getChecksum(nonChecksumBytes)
       _ <- expect(crc === checkSum).failFast
+
+      tombstone <- IO(bb.get())
+      _ <- expect(tombstone === 0.toByte).failFast
 
       keySize <- IO(bb.getInt)
       _ <- expect(keySize === KeySize).failFast
@@ -82,11 +87,14 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
       bb <- KeyValueEntryCodec.encode(entry)
 
       crc <- IO(bb.getInt)
-      nonChecksumBytes <- IO(
-        bb.slice(ChecksumSize, KeyAndValueSizesSize + KeySize + ValueSize)
-      )
+      nonChecksumBytes <- IO {
+        bb.slice(ChecksumSize, NonCrcHeaderSize + KeySize + ValueSize)
+      }
       checkSum <- getChecksum(nonChecksumBytes)
       _ <- expect(crc === checkSum).failFast
+
+      tombstone <- IO(bb.get())
+      _ <- expect(tombstone === 0.toByte).failFast
 
       keySize <- IO(bb.getInt)
       _ <- expect(keySize === KeySize).failFast
@@ -111,11 +119,14 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
       bb <- KeyValueEntryCodec.encode(entry)
 
       crc <- IO(bb.getInt)
-      nonChecksumBytes <- IO(
-        bb.slice(ChecksumSize, KeyAndValueSizesSize + KeySize + ValueSize)
-      )
+      nonChecksumBytes <- IO {
+        bb.slice(ChecksumSize, NonCrcHeaderSize + KeySize + ValueSize)
+      }
       checkSum <- getChecksum(nonChecksumBytes)
       _ <- expect(crc === checkSum).failFast
+
+      tombstone <- IO(bb.get())
+      _ <- expect(tombstone === 0.toByte).failFast
 
       keySize <- IO(bb.getInt)
       _ <- expect(keySize === KeySize).failFast
@@ -187,7 +198,7 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
 
     for {
       bytes <- KeyValueEntryCodec.encode(entry)
-      corruptionOffset = ChecksumSize + KeyAndValueSizesSize
+      corruptionOffset = ChecksumSize + NonCrcHeaderSize
       _ <- IO(
         bytes
           .put(corruptionOffset, 1.toByte)

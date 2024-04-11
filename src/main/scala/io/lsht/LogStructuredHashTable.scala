@@ -9,7 +9,7 @@ import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
 
 class LogStructuredHashTable[F[_]: Async] private (
-    queue: QueueSink[F, PutCommand[F]],
+    queue: QueueSink[F, WriteCommand[F]],
     index: Ref[F, Map[Key, EntryFileReference]],
     isClosed: Ref[F, Boolean]
 ) {
@@ -42,7 +42,7 @@ class LogStructuredHashTable[F[_]: Async] private (
 
   def put(key: Key, value: Value): F[Unit] =
     for {
-      cmd <- PutCommand(key, value)
+      cmd <- WriteCommand.Put(key, value)
       _ <- queue.offer(cmd)
       _ <- validateDbIsOpen
       result <- cmd.waitUntilComplete
@@ -55,11 +55,21 @@ class LogStructuredHashTable[F[_]: Async] private (
       }
     } yield ()
 
-  // TODO: Support
+  // TODO: Deduplicate, short circuit
   def delete(key: Key): F[Unit] =
-    ApplicativeError[F, Throwable].raiseError(
-      new UnsupportedOperationException("Delete not yet supported")
-    )
+    for {
+      cmd <- WriteCommand.Delete(key)
+      _ <- queue.offer(cmd)
+      _ <- validateDbIsOpen
+      result <- cmd.waitUntilComplete
+      _ <- result match {
+        case () =>
+          Applicative[F].unit
+        case cause: Throwable =>
+          ApplicativeError[F, Throwable]
+            .raiseError[Unit](Errors.Write.Failed(cause))
+      }
+    } yield ()
 
   // TODO: Support
   def keys: Stream[F, Key] = Stream.empty
@@ -140,7 +150,6 @@ object LogStructuredHashTable {
           // TODO: for big files, can we create pointers to different points to read in parallel, this would speedup
           //  start times. So first few bytes of file would contain a pointer to another spot in file, only needed
           //  for large files. There is a readRage
-          // TODO: Resource.force/suspend ?
           Resource.suspend {
             for {
               _ <- ApplicativeError[F, Throwable].raiseUnless(otherFiles.isEmpty)(
@@ -152,9 +161,10 @@ object LogStructuredHashTable {
                 .through(DataFileDecoder.decode[F])
                 .evalMap {
                   case (Left(err), offset) =>
+                    // whether entry or tombstone should be in error
                     Console[F].println(err.toString + s" at offset $offset")
 
-                  case (Right(entry), offset) =>
+                  case (Right(entry: KeyValueEntry), offset) =>
                     index.update(
                       _.updated(
                         entry.key,
@@ -165,6 +175,9 @@ object LogStructuredHashTable {
                         )
                       )
                     )
+
+                  case (Right(key: DataFileDecoder.Tombstone), _) =>
+                    index.update(_.removed(key))
                 }
                 .compile
                 .drain
@@ -191,7 +204,7 @@ object LogStructuredHashTable {
 
   private def runDatabase[F[_]: Async: Console: Clock](writerFile: Path, index: Ref[F, Map[Key, EntryFileReference]]) =
     for {
-      queue <- Resource.eval(Queue.unbounded[F, PutCommand[F]])
+      queue <- Resource.eval(Queue.unbounded[F, WriteCommand[F]])
 
       cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
       seriallyExecuteWrites = MonadCancel[F].guaranteeCase(
@@ -244,7 +257,57 @@ object LogStructuredHashTable {
   private def executeCommand[F[_]: Async: Console: Clock](
       writerFile: Path,
       index: Ref[F, Map[Key, EntryFileReference]]
-  )(putCmd: PutCommand[F]) = {
+  )(cmd: WriteCommand[F]) = {
+    (cmd match
+      case put @ WriteCommand.Put(_, _) =>
+        executePut(writerFile, index)(put)
+
+      case delete @ WriteCommand.Delete(_, _) =>
+        executeDelete(writerFile, index)(delete)
+    ) *> cmd.complete(()) // Signal complete to writer thread
+  }
+
+  private def executeDelete[F[_]: Async: Console: Clock](
+      writerFile: Path,
+      index: Ref[F, Map[Key, EntryFileReference]]
+  )(deleteCmd: WriteCommand.Delete[F]) = {
+    def guarantee[A](fa: F[A])(onCancel: => Errors.WriteException): F[A] =
+      MonadCancel[F].guaranteeCase(fa) {
+        case Outcome.Succeeded(_) => ().pure[F]
+        case Outcome.Errored(e) => deleteCmd.complete(Errors.Write.Failed(e)).void
+        case Outcome.Canceled() => deleteCmd.complete(onCancel).void
+      }
+
+    index.get
+      .map(_.contains(deleteCmd.key))
+      // key was already deleted, so don't pollute the data file
+      .flatMap(Applicative[F].whenA(_) {
+        for {
+          // Encode Key-Value Pair
+          bytes <- guarantee(TombstoneEncoder.encode(deleteCmd.key))(
+            onCancel = Errors.Write.Cancelled
+          )
+
+          // Write to file
+          _ <- guarantee(
+            Files[F].open(writerFile, Flags.Append).use { fh =>
+              fh.size
+                .flatMap { offset => fh.write(Chunk.byteBuffer(bytes), offset) }
+            }
+          )(onCancel = Errors.Write.CancelledButSavedToDisk)
+
+          // Update in-memory index, for reads
+          _ <- guarantee(
+            index.update(_.removed(deleteCmd.key))
+          )(onCancel = Errors.Write.CancelledButSavedToDisk)
+        } yield ()
+      })
+  }
+
+  private def executePut[F[_]: Async: Console: Clock](
+      writerFile: Path,
+      index: Ref[F, Map[Key, EntryFileReference]]
+  )(putCmd: WriteCommand.Put[F]) = {
     def guarantee[A](fa: F[A])(onCancel: => Errors.WriteException): F[A] =
       MonadCancel[F].guaranteeCase(fa) {
         case Outcome.Succeeded(_) => ().pure[F]
@@ -286,15 +349,12 @@ object LogStructuredHashTable {
           )
         )
       )(onCancel = Errors.Write.CancelledButSavedToDisk)
-
-      // Signal complete to writer thread
-      _ <- putCmd.complete(())
     } yield ()
   }
 
   private def drain[F[_]: Monad](
-      queue: Queue[F, PutCommand[F]]
-  ): F[List[PutCommand[F]]] =
+      queue: Queue[F, WriteCommand[F]]
+  ): F[List[WriteCommand[F]]] =
     queue.size
       .map(_ + 100)
       .map(_.some)
