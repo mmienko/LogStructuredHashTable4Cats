@@ -7,11 +7,11 @@ import weaver.*
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
+import io.lsht.CodecCommons._
 
 object KeyValueEntryCodecTest extends SimpleIOSuite {
 
-  private val ChecksumSize = 4
-  private val NonCrcHeaderSize = 9
+  private val NonCrcHeaderSize: Int = 9
 
   test("Encode KeyValueEntry with non-empty key and non-empty value") {
     val entry = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
@@ -208,20 +208,6 @@ object KeyValueEntryCodecTest extends SimpleIOSuite {
     } yield matches(res) { case Left(error) =>
       expect(error == Errors.Read.BadChecksum)
     }
-  }
-
-  private def getString(bytes: Int)(byteBuffer: ByteBuffer): String = {
-    val str = Array.fill(bytes)(0.toByte)
-    byteBuffer.get(str)
-    new String(str)
-  }
-
-  private def getChecksum(byteBuffer: ByteBuffer) = IO {
-    val bytes = Array.fill(byteBuffer.limit())(0.toByte)
-    byteBuffer.get(bytes)
-    val crc32c = new CRC32C
-    crc32c.update(bytes)
-    crc32c.getValue.toInt
   }
 
 }
