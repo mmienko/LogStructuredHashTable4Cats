@@ -8,9 +8,6 @@ import java.nio.ByteBuffer
 
 object DataFileDecoderTest extends SimpleIOSuite {
 
-  private val ChecksumSize = 4
-  private val KeyAndValueSizesSize = 8
-
   test("decode stream of bytes for a single KeyValueEntry") {
     val entry = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
 

@@ -9,7 +9,8 @@ import java.nio.ByteBuffer
 
 object KeyValueEntryCodec {
 
-  val HeaderSize: Int = CodecUtils.CommonHeaderSize + 4 // 4-byte Value Size
+  val ValueSizeSize: Int = 4
+  val HeaderSize: Int = CodecUtils.CommonHeaderSize + ValueSizeSize
 
   def size(entry: KeyValueEntry): Int = HeaderSize + entry.size
 
