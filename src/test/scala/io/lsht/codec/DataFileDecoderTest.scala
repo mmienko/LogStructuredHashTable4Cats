@@ -1,7 +1,9 @@
-package io.lsht
+package io.lsht.codec
 
 import cats.syntax.all.*
 import fs2.Chunk
+import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
+import io.lsht.{Key, KeyValueEntry}
 import weaver.*
 
 import java.nio.ByteBuffer

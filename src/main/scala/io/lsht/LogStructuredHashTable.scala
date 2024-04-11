@@ -7,6 +7,7 @@ import cats.{Applicative, ApplicativeError, Monad, Monoid, Semigroup}
 import fs2.io.file.{Files, Flags, Path}
 import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
+import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
 
 class LogStructuredHashTable[F[_]: Async] private (
     queue: QueueSink[F, WriteCommand[F]],

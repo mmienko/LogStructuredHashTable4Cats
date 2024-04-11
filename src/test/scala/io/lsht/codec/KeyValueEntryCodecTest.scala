@@ -1,13 +1,15 @@
-package io.lsht
+package io.lsht.codec
 
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
+import io.lsht.codec.CodecCommons.*
+import io.lsht.codec.KeyValueEntryCodec
+import io.lsht.{Errors, Key, KeyValueEntry}
 import weaver.*
 
 import java.nio.ByteBuffer
 import java.util.zip.CRC32C
-import io.lsht.CodecCommons._
 
 object KeyValueEntryCodecTest extends SimpleIOSuite {
 

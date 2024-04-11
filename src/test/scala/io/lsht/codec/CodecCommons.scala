@@ -1,4 +1,4 @@
-package io.lsht
+package io.lsht.codec
 
 import cats.effect.IO
 

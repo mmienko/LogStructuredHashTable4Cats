@@ -1,9 +1,10 @@
-package io.lsht
+package io.lsht.codec
 
 import cats.effect.Sync
-import fs2.{Chunk, Pipe, Pull}
 import cats.syntax.all.*
-import io.lsht.KeyValueEntryCodec.ValueSizeSize
+import fs2.{Chunk, Pipe, Pull}
+import io.lsht.codec.KeyValueEntryCodec.ValueSizeSize
+import io.lsht.*
 
 object DataFileDecoder {
 

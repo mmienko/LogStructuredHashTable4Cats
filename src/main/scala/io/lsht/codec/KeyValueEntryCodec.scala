@@ -1,8 +1,9 @@
-package io.lsht
+package io.lsht.codec
 
 import cats.ApplicativeError
 import cats.effect.Sync
 import cats.implicits.*
+import io.lsht.{KeyValueEntry, Errors, Key}
 import fs2.*
 
 import java.nio.ByteBuffer
