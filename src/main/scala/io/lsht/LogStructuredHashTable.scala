@@ -41,35 +41,12 @@ class LogStructuredHashTable[F[_]: Async] private (
     }
 
   def put(key: Key, value: Value): F[Unit] =
-    for {
-      cmd <- WriteCommand.Put(key, value)
-      _ <- queue.offer(cmd)
-      _ <- validateDbIsOpen
-      result <- cmd.waitUntilComplete
-      _ <- result match {
-        case () =>
-          Applicative[F].unit
-        case cause: Throwable =>
-          ApplicativeError[F, Throwable]
-            .raiseError[Unit](Errors.Write.Failed(cause))
-      }
-    } yield ()
+    submitWriteCommand(WriteCommand.Put(key, value))
 
-  // TODO: Deduplicate, short circuit
   def delete(key: Key): F[Unit] =
-    for {
-      cmd <- WriteCommand.Delete(key)
-      _ <- queue.offer(cmd)
-      _ <- validateDbIsOpen
-      result <- cmd.waitUntilComplete
-      _ <- result match {
-        case () =>
-          Applicative[F].unit
-        case cause: Throwable =>
-          ApplicativeError[F, Throwable]
-            .raiseError[Unit](Errors.Write.Failed(cause))
-      }
-    } yield ()
+    index.get
+      .map(_.contains(key))
+      .flatMap(Applicative[F].whenA(_)(submitWriteCommand(WriteCommand.Delete(key))))
 
   // TODO: Support
   def keys: Stream[F, Key] = Stream.empty
@@ -103,6 +80,20 @@ class LogStructuredHashTable[F[_]: Async] private (
       )
     )
 
+  private def submitWriteCommand[C <: WriteCommand[F]](makeWriteCommand: F[C]): F[Unit] =
+    for {
+      cmd <- makeWriteCommand
+      _ <- queue.offer(cmd)
+      _ <- validateDbIsOpen
+      result <- cmd.waitUntilComplete
+      _ <- result match {
+        case () =>
+          Applicative[F].unit
+        case cause: Throwable =>
+          ApplicativeError[F, Throwable]
+            .raiseError[Unit](Errors.Write.Failed(cause))
+      }
+    } yield ()
 }
 
 object LogStructuredHashTable {
