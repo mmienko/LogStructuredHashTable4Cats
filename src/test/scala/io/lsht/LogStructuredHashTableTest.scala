@@ -4,7 +4,7 @@ import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
-import io.lsht.TestUtils.DataFileNamePattern
+import io.lsht.TestUtils.{DataFileNamePattern, expectString, tempDatabase}
 import weaver.*
 
 import java.nio.file.AccessDeniedException
@@ -13,16 +13,13 @@ import java.util.regex.Pattern
 object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database can be opened and closed") {
-    (for {
-      dir <- Files[IO].tempDirectory
-      files <- Resource.eval(Files[IO].list(dir).compile.toList)
-      _ <- Resource.eval(expect(files.isEmpty).failFast)
-      _ <- LogStructuredHashTable[IO](dir)
-      files <- Resource.eval(Files[IO].list(dir).compile.toList)
-      _ <- Resource.eval(expect(files.size === 1).failFast)
-    } yield {
-      expect(files.head.fileName.toString.matches(DataFileNamePattern))
-    }).use(IO.pure)
+    Files[IO].tempDirectory.use { dir =>
+      Files[IO].list(dir).compile.toList.flatMap(files => expect(files.isEmpty).failFast) *>
+        LogStructuredHashTable[IO](dir).use_ *>
+        Files[IO].list(dir).compile.toList.map { files =>
+          expect(files.size === 1) and expect(files.head.fileName.toString.matches(DataFileNamePattern))
+        }
+    }
   }
 
   test("Database can be re-opened") {
@@ -39,18 +36,16 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   }
 
   test("Database supports reads and writes") {
-    Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO](_))
-      .use { db =>
-        val key = Key("key".getBytes)
-        val value = "value".getBytes
-        for {
-          res <- db.get(key)
-          _ <- expect(res.isEmpty).failFast
-          _ <- db.put(key, value)
-          res <- db.get(key)
-        } yield exists(res)(v => expect(new String(v) === "value"))
-      }
+    tempDatabase.use { db =>
+      val key = Key("key".getBytes)
+      val value = "value".getBytes
+      for {
+        res <- db.get(key)
+        _ <- expect(res.isEmpty).failFast
+        _ <- db.put(key, value)
+        res <- db.get(key)
+      } yield exists(res)(expectString("value"))
+    }
   }
 
   test("Write is persisted across open & close of Database") {
@@ -61,26 +56,24 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         LogStructuredHashTable[IO](dir).use(_.put(key, value)) *>
           LogStructuredHashTable[IO](dir).use(_.get(key))
       }
-      .map(res => exists(res)(v => expect(new String(v) === "value")))
+      .map(res => exists(res)(expectString("value")))
   }
 
   test("Database supports multiple reads and writes") {
-    Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO](_))
-      .use { db =>
-        for {
-          uuids <- IO.randomUUID.replicateA(20)
-          ids = uuids.map(_.toString.getBytes).map(Key.apply)
-          gets <- ids.parTraverse(db.get)
-          _ <- gets
-            .map(res => expect(res.isEmpty))
-            .reduce((a, b) => a and b)
-            .failFast
-          _ <- ids.parTraverse(id => db.put(id, id.value))
-          gets <- ids.parTraverse(db.get)
-          values = gets.collect { case Some(v) => new String(v) }.toSet
-        } yield expect(values === uuids.map(_.toString).toSet)
-      }
+    tempDatabase.use { db =>
+      for {
+        uuids <- IO.randomUUID.replicateA(20)
+        ids = uuids.map(_.toString.getBytes).map(Key.apply)
+        gets <- ids.parTraverse(db.get)
+        _ <- gets
+          .map(res => expect(res.isEmpty))
+          .reduce((a, b) => a and b)
+          .failFast
+        _ <- ids.parTraverse(id => db.put(id, id.value))
+        gets <- ids.parTraverse(db.get)
+        values = gets.collect { case Some(v) => new String(v) }.toSet
+      } yield expect(values === uuids.map(_.toString).toSet)
+    }
   }
 
   test("Database supports reads and write over multiple reopens") {
@@ -107,18 +100,16 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   }
 
   test("Database supports overwriting keys") {
-    Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO](_))
-      .use { db =>
-        val key = Key("key".getBytes)
-        val value1 = "value1".getBytes
-        val value2 = "value2".getBytes
-        for {
-          _ <- db.put(key, value1)
-          _ <- db.put(key, value2)
-          res <- db.get(key)
-        } yield exists(res)(v => expect(new String(v) === "value2"))
-      }
+    tempDatabase.use { db =>
+      val key = Key("key".getBytes)
+      val value1 = "value1".getBytes
+      val value2 = "value2".getBytes
+      for {
+        _ <- db.put(key, value1)
+        _ <- db.put(key, value2)
+        res <- db.get(key)
+      } yield exists(res)(expectString("value2"))
+    }
   }
 
   test("Database validates checksum") {
@@ -239,17 +230,13 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   }
 
   test("Database has no effect when deleting a key that doesn't exist") {
-    Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO](_))
-      .use { db =>
-        db.delete(Key("key1"))
-      }
+    tempDatabase
+      .use { db => db.delete(Key("key1")) }
       .as(success)
   }
 
   test("Database can delete existing keys") {
-    Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO](_))
+    tempDatabase
       .use { db =>
         val key = Key("key1")
         db.put(key, "value1".getBytes) *>
@@ -275,9 +262,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
               .flatTap(_ => db.delete(key2))
           }
           .flatMap { case (res1, res2) =>
-            (expect(res1.isEmpty) and matches(res2) { case Some(value) =>
-              expect(new String(value) === "value2")
-            }).failFast
+            (expect(res1.isEmpty) and exists(res2)(expectString("value2"))).failFast
           } *> LogStructuredHashTable[IO](dir)
           .use { db =>
             db.get(key2)

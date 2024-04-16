@@ -54,10 +54,10 @@ object FileRotationTest extends SimpleIOSuite {
             db.put(key4, "v2".getBytes) *> db.put(key1, "v3".getBytes)
         }
         _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
-          db.get(key1).map(expectSomeString("v3")) *>
-            db.get(key2).map(res => expect(res.==(none[Value]))) *>
-            db.get(key3).map(expectSomeString("v1")) *>
-            db.get(key4).map(expectSomeString("v2"))
+          db.get(key1).map(expectSomeString("v3")).flatMap(_.failFast) *>
+            db.get(key2).map(res => expect(res.==(none[Value]))).flatMap(_.failFast) *>
+            db.get(key3).map(expectSomeString("v1")).flatMap(_.failFast) *>
+            db.get(key4).map(expectSomeString("v2")).flatMap(_.failFast)
         }
       } yield success
     }
