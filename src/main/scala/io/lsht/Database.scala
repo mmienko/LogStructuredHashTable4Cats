@@ -1,25 +1,27 @@
 package io.lsht
 
+import cats.data.NonEmptyList
 import cats.effect.*
-import cats.effect.std.{Console, Queue, Supervisor}
+import cats.effect.std.{Console, Hotswap, Queue, Supervisor}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError, Monad}
-import fs2.io.file.{Files, Flags, Path}
-import fs2.{Chunk, Stream}
+import fs2.io.file.*
+import fs2.{Chunk, Pipe, Pull, Stream}
 import io.lsht.LogStructuredHashTable.*
 import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
 
+// TODO: just use database instead of HashTable object
 object Database {
 
   // TODO: s/Console/Logger
-  def apply[F[_]: Async: Console](directory: Path): Resource[F, LogStructuredHashTable[F]] =
+  def apply[F[_]: Async: Console](directory: Path, entriesLimit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
     Resource.suspend {
       for {
         _ <- verifyPathIsDirectory[F](directory)
 
         files <- getFiles(directory)
-      } yield files.sortBy(_.fileName.toString).toList match {
-        case writerFile :: otherFiles =>
+      } yield NonEmptyList.fromFoldable(files.sortBy(_.fileName.toString)) match
+        case Some(dataFiles) =>
           /*
         Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use
         a timestamp to differentiate between the two. As a matter of fact, on each new startup, simply create a new
@@ -54,64 +56,83 @@ object Database {
           //  for large files. There is a readRage
           Resource.suspend {
             for {
-              _ <- ApplicativeError[F, Throwable].raiseUnless(otherFiles.isEmpty)(
-                new UnsupportedOperationException("Assuming no file rotation")
-              )
-              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
-              _ <- Files[F]
-                .readAll(writerFile)
-                .through(DataFileDecoder.decode[F])
-                .evalMap {
-                  case (Left(err), offset) =>
-                    // whether entry or tombstone should be in error
-                    Console[F].println(err.toString + s" at offset $offset")
+              _ <- ApplicativeError[F, Throwable].raiseUnless(
+                dataFiles.forall(_.fileName.toString.startsWith("data."))
+              )(new UnsupportedOperationException("Assuming only rotated data files"))
 
-                  case (Right(entry: KeyValueEntry), offset) =>
-                    index.update(
-                      _.updated(
-                        entry.key,
-                        EntryFileReference(
-                          writerFile,
-                          positionInFile = offset,
-                          entrySize = KeyValueEntryCodec.size(entry)
+              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
+
+              counts <- dataFiles.traverse { dataFile =>
+                Files[F]
+                  .readAll(dataFile)
+                  .through(DataFileDecoder.decode[F])
+                  .evalMap {
+                    case (Left(err), offset) =>
+                      // whether entry or tombstone should be in error
+                      Console[F].println(err.toString + s" at offset $offset")
+
+                    case (Right(entry: KeyValueEntry), offset) =>
+                      index.update(
+                        _.updated(
+                          entry.key,
+                          EntryFileReference(
+                            dataFile,
+                            positionInFile = offset,
+                            entrySize = KeyValueEntryCodec.size(entry)
+                          )
                         )
                       )
-                    )
 
-                  case (Right(key: DataFileDecoder.Tombstone), _) =>
-                    index.update(_.removed(key))
-                }
-                .compile
-                .drain
-            } yield runDatabase(writerFile, index)
+                    case (Right(key: DataFileDecoder.Tombstone), _) =>
+                      index.update(_.removed(key))
+                  }
+                  .fold(0) { case (count, _) => count + 1 }
+                  .compile
+                  .last
+              }
+
+              count = counts.last
+            } yield runDatabase(
+              directory,
+              initialFile = dataFiles.last,
+              initialEntries = count.getOrElse(0),
+              index,
+              entriesLimit
+            )
           }
 
-        case Nil =>
+        case None =>
           // new DB
           Resource.suspend {
             for {
-              now <- Clock[F].realTime
-
-              writerFile = directory / s"data.${now.toMillis.toString}.db"
+              writerFile <- newFileName(directory)
 
               // TODO: what happens if file already exists? B/c two programs are running?
               _ <- Files[F].createFile(writerFile)
 
               index <- Ref[F].of(Map.empty[Key, EntryFileReference])
-            } yield runDatabase(writerFile, index)
+            } yield runDatabase(directory, writerFile, initialEntries = 0, index, entriesLimit)
           }
-      }
     }
 
-  private def runDatabase[F[_]: Async: Console: Clock](writerFile: Path, index: Ref[F, Map[Key, EntryFileReference]]) =
+  private def runDatabase[F[_]: Async: Console: Clock](
+      directory: Path,
+      initialFile: Path,
+      initialEntries: Int,
+      index: Ref[F, Map[Key, EntryFileReference]],
+      entriesLimit: Int
+  ) =
     for {
       queue <- Resource.eval(Queue.unbounded[F, WriteCommand[F]])
 
       cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
+      // TODO: for cancellation, maybe have queue be None terminated, then on close send None?
       seriallyExecuteWrites = MonadCancel[F].guaranteeCase(
         Stream
-          .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be?
-          .evalMap(executeCommand(writerFile, index))
+          .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be? Higher is better for performancea
+          .evalMap(interpretCommand(index))
+          .flattenOption
+          .through(executeWriteAndRotateFile(initialFile, initialEntries, newFileName(directory), entriesLimit))
           .compile
           .drain
       ) {
@@ -155,95 +176,50 @@ object Database {
       .compile
       .toVector
 
-  private def executeCommand[F[_]: Async: Console: Clock](
-      writerFile: Path,
-      index: Ref[F, Map[Key, EntryFileReference]]
-  )(cmd: WriteCommand[F]) = {
-    (cmd match
-      case put @ WriteCommand.Put(_, _) =>
-        executePut(writerFile, index)(put)
+  private def newFileName[F[_]: Clock: Applicative](directory: Path) =
+    Clock[F].realTime.map(now => directory / s"data.${now.toMillis.toString}.db")
 
-      case delete @ WriteCommand.Delete(_, _) =>
-        executeDelete(writerFile, index)(delete)
-    ) *> cmd.complete(()) // Signal complete to writer thread
-  }
-
-  private def executeDelete[F[_]: Async: Console: Clock](
-      writerFile: Path,
-      index: Ref[F, Map[Key, EntryFileReference]]
-  )(deleteCmd: WriteCommand.Delete[F]) = {
-    def guarantee[A](fa: F[A])(onCancel: => Errors.WriteException): F[A] =
-      guaranteeCommandCompletes(deleteCmd)(fa, onCancel)
-
-    index.get
-      .map(_.contains(deleteCmd.key))
-      // key was already deleted, so don't pollute the data file
-      .flatMap(Applicative[F].whenA(_) {
-        for {
-          // Encode Key-Value Pair
-          bytes <- guarantee(TombstoneEncoder.encode(deleteCmd.key))(
-            onCancel = Errors.Write.Cancelled
+  private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, EntryFileReference]])(
+      cmd: WriteCommand[F]
+  ): F[Option[BytesToFile[F]]] =
+    cmd match // tODO: guaranteeCommandCompletes
+      case WriteCommand.Put(keyValueEntry, signal) =>
+        KeyValueEntryCodec
+          .encode(keyValueEntry)
+          .map(bytes =>
+            BytesToFile(
+              bytes,
+              onWrite = (fileOffset, writerFile) =>
+                index.update(
+                  _.updated(
+                    keyValueEntry.key,
+                    EntryFileReference(
+                      filePath = writerFile,
+                      positionInFile = fileOffset,
+                      entrySize = bytes.capacity()
+                    )
+                  )
+                ) *> signal.complete(()).void
+            ).some
           )
 
-          // Write to file
-          _ <- guarantee(
-            Files[F].open(writerFile, Flags.Append).use { fh =>
-              fh.size
-                .flatMap { offset => fh.write(Chunk.byteBuffer(bytes), offset) }
-            }
-          )(onCancel = Errors.Write.CancelledButSavedToDisk)
+      case WriteCommand.Delete(key, signal) =>
+        index.get
+          .map(_.contains(key))
+          .flatMap {
+            case false =>
+              signal.complete(()).as(none[BytesToFile[F]])
 
-          // Update in-memory index, for reads
-          _ <- guarantee(
-            index.update(_.removed(deleteCmd.key))
-          )(onCancel = Errors.Write.CancelledButSavedToDisk)
-        } yield ()
-      })
-  }
-
-  private def executePut[F[_]: Async: Console: Clock](
-      writerFile: Path,
-      index: Ref[F, Map[Key, EntryFileReference]]
-  )(putCmd: WriteCommand.Put[F]) = {
-    def guarantee[A](fa: F[A])(onCancel: => Errors.WriteException): F[A] =
-      guaranteeCommandCompletes(putCmd)(fa, onCancel)
-
-    for {
-      // Encode Key-Value Pair
-      bytes <- guarantee(KeyValueEntryCodec.encode(putCmd.keyValueEntry))(
-        onCancel = Errors.Write.Cancelled
-      )
-
-      // Write to file, rotating if necessary
-      // TODO: Copy Files.writeRotate but operate at the ByteBuffer level. Rotation could simply be on number
-      //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
-      //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
-      //  space.
-      positionOfEntry <- guarantee(
-        Files[F].open(writerFile, Flags.Append).use { fh =>
-          fh.size
-            .flatMap { offset =>
-              fh.write(Chunk.byteBuffer(bytes), offset)
-                .as(offset)
-            }
-        }
-      )(onCancel = Errors.Write.CancelledButSavedToDisk)
-
-      // Update in-memory index, for reads
-      _ <- guarantee(
-        index.update(
-          _.updated(
-            putCmd.key,
-            EntryFileReference(
-              filePath = writerFile,
-              positionInFile = positionOfEntry,
-              entrySize = bytes.capacity()
-            )
-          )
-        )
-      )(onCancel = Errors.Write.CancelledButSavedToDisk)
-    } yield ()
-  }
+            case true =>
+              TombstoneEncoder
+                .encode(key)
+                .map(bytes =>
+                  BytesToFile(
+                    bytes,
+                    onWrite = (_, _) => index.update(_.removed(key)) *> signal.complete(()).void
+                  ).some
+                )
+          }
 
   private def drain[F[_]: Monad](
       queue: Queue[F, WriteCommand[F]]
@@ -261,4 +237,74 @@ object Database {
       case Outcome.Errored(e) => writeCmd.complete(Errors.Write.Failed(e)).void
       case Outcome.Canceled() => writeCmd.complete(onCancel).void
     }
+
+  private def guaranteeCommandCompletes[F[_]: Sync, A](
+      signal: Deferred[F, WriteResult]
+  )(fa: F[A], onCancel: => Errors.WriteException): F[A] =
+    MonadCancel[F].guaranteeCase(fa) {
+      case Outcome.Succeeded(_) => ().pure[F]
+      case Outcome.Errored(e) => signal.complete(Errors.Write.Failed(e)).void
+      case Outcome.Canceled() => signal.complete(onCancel).void
+    }
+
+  // TODO: create new file each time, ignore an initial file. Rotation could simply be on number
+  //  of entries, which will reduce startup times to load index. Or a secondary threshold that measures
+  //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
+  //  space.
+  private[lsht] def executeWriteAndRotateFile[F[_]: Async](
+      initialFile: Path,
+      initialEntries: Int,
+      computePath: F[Path],
+      entriesLimit: Int
+  ): Pipe[F, BytesToFile[F], Unit] = {
+    def toCursor(file: FileHandle[F]): F[WriteCursor[F]] =
+      Files[F].writeCursorFromFileHandle(file, append = true)
+
+    def swapFile(fileHotswap: Hotswap[F, FileHandle[F]]) =
+      computePath.flatMap { path =>
+        fileHotswap
+          .swap(Files[F].open(path, Flags.Append))
+          .flatMap(toCursor)
+          .tupleRight(path)
+      }
+
+    def go(
+        s: Stream[F, BytesToFile[F]],
+        fileHotswap: Hotswap[F, FileHandle[F]],
+        currentFile: Path,
+        cursor: WriteCursor[F],
+        entriesWritten: Int
+    ): Pull[F, Unit, Unit] = {
+      s.pull.uncons1.flatMap {
+        case Some((bytesToFile, tail)) =>
+          for {
+            updatedCursor <- cursor.writePull(Chunk.byteBuffer(bytesToFile.bytebuffer))
+            _ <- Pull.eval(bytesToFile.onWrite(cursor.offset, currentFile))
+            numEntries = entriesWritten + 1
+            _ <-
+              if (numEntries > entriesLimit)
+                Pull
+                  .eval(swapFile(fileHotswap))
+                  .flatMap { case (newCursor, path) => go(tail, fileHotswap, path, newCursor, entriesWritten = 1) }
+              else
+                go(tail, fileHotswap, currentFile, updatedCursor, numEntries)
+          } yield ()
+
+        case None =>
+          Pull.done
+      }
+    }
+
+    in =>
+      for {
+        (fileHotSwap, fileHandle) <- Stream.resource(Hotswap(Files[F].open(initialFile, Flags.Append)))
+        cursor <- Stream.eval(toCursor(fileHandle))
+        _ <- go(in, fileHotSwap, initialFile, cursor, initialEntries).stream
+      } yield ()
+  }
+
+  private[lsht] final case class BytesToFile[F[_]](
+      bytebuffer: java.nio.ByteBuffer,
+      onWrite: (Offset, Path) => F[Unit]
+  )
 }

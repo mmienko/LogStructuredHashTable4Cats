@@ -19,7 +19,7 @@ object Key {
 }
 
 type Value = Array[Byte]
-
+private type Offset = Long
 private type WriteResult = Unit | Throwable
 
 private final case class KeyValueEntry(key: Key, value: Value) {

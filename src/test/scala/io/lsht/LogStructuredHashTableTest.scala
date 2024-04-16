@@ -4,13 +4,13 @@ import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
+import io.lsht.TestUtils.DataFileNamePattern
 import weaver.*
 
 import java.nio.file.AccessDeniedException
-import java.util.UUID
+import java.util.regex.Pattern
 
 object LogStructuredHashTableTest extends SimpleIOSuite {
-  private val DataFileNamePattern = "data\\.\\d*\\.db"
 
   test("Database can be opened and closed") {
     (for {
@@ -40,7 +40,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database supports reads and writes") {
     Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO])
+      .flatMap(LogStructuredHashTable[IO](_))
       .use { db =>
         val key = Key("key".getBytes)
         val value = "value".getBytes
@@ -66,7 +66,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database supports multiple reads and writes") {
     Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO])
+      .flatMap(LogStructuredHashTable[IO](_))
       .use { db =>
         for {
           uuids <- IO.randomUUID.replicateA(20)
@@ -108,7 +108,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database supports overwriting keys") {
     Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO])
+      .flatMap(LogStructuredHashTable[IO](_))
       .use { db =>
         val key = Key("key".getBytes)
         val value1 = "value1".getBytes
@@ -240,7 +240,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database has no effect when deleting a key that doesn't exist") {
     Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO])
+      .flatMap(LogStructuredHashTable[IO](_))
       .use { db =>
         db.delete(Key("key1"))
       }
@@ -249,7 +249,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database can delete existing keys") {
     Files[IO].tempDirectory
-      .flatMap(LogStructuredHashTable[IO])
+      .flatMap(LogStructuredHashTable[IO](_))
       .use { db =>
         val key = Key("key1")
         db.put(key, "value1".getBytes) *>

@@ -8,7 +8,6 @@ import io.lsht.*
 
 object DataFileDecoder {
 
-  type Offset = Long
   type Tombstone = Key
   type ParsedKeyValueEntry = (Either[Throwable, KeyValueEntry | Tombstone], Offset)
   private type KeySize = Int

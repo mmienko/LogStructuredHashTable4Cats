@@ -99,7 +99,8 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
 
 object LogStructuredHashTable {
 
-  def apply[F[_]: Async: Console](directory: Path): Resource[F, LogStructuredHashTable[F]] = Database(directory)
+  def apply[F[_]: Async: Console](directory: Path, limit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
+    Database(directory, limit)
 
   private[lsht] final case class EntryFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
 
