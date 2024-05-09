@@ -1,7 +1,9 @@
 package io.lsht
 
+import cats.Eq
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
+import fs2.io.file.Path
 
 import java.util
 
@@ -15,6 +17,9 @@ final case class Key(value: Array[Byte]) extends AnyVal {
 }
 
 object Key {
+
+  given Eq[Key] = Eq.by(_.value)
+
   def apply(string: String): Key = new Key(string.getBytes)
 }
 
@@ -24,6 +29,10 @@ private type WriteResult = Unit | Throwable
 
 private final case class KeyValueEntry(key: Key, value: Value) {
   def size: Int = key.length + value.length
+}
+
+object KeyValueEntry {
+  given Eq[KeyValueEntry] = Eq.and(Eq.by(_.key), Eq.by(_.value))
 }
 
 private sealed abstract class WriteCommand[F[_]](signal: Deferred[F, WriteResult]) extends Product with Serializable {
@@ -58,3 +67,23 @@ object WriteCommand {
   }
 
 }
+
+private final case class EntryFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
+
+object EntryFileReference {
+  given Eq[EntryFileReference] = Eq.instance { (a, b) =>
+    a.filePath === b.filePath && a.positionInFile == b.positionInFile && a.entrySize === b.entrySize
+  }
+}
+
+// TODO: use in DB
+private given Ordering[Path] = (x: Path, y: Path) => x.fileName.toString.compare(y.fileName.toString)
+private given Eq[Array[Byte]] = Eq.instance(_ sameElements _)
+
+private final case class EntryHint(key: Key, positionInFile: Long, valueSize: Int)
+
+private object EntryHint {
+  given Eq[EntryHint] = Eq.fromUniversalEquals
+}
+
+private final case class CompactedFiles(hint: Path, values: Path, timestamp: Long)
