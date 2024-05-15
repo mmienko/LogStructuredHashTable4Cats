@@ -2,14 +2,18 @@ package io.lsht.codec
 
 import cats.effect.Sync
 import cats.syntax.all.*
+import fs2.io.file.Path
 import fs2.{Chunk, Pipe, Pull}
-import io.lsht.codec.KeyValueEntryCodec.ValueSizeSize
 import io.lsht.*
+import io.lsht.codec.KeyValueEntryCodec.ValueSizeSize
 
 object DataFileDecoder {
 
   type Tombstone = Key
-  type ParsedKeyValueEntry = (Either[Throwable, KeyValueEntry | Tombstone], Offset)
+  // TODO: Adt's instead of |
+  type ParsedKeyValueEntry = ParsedHeaderState[KeyValueEntry]
+  type ParsedEntryFileReference = Either[Throwable, (Key, EntryFileReference) | Tombstone]
+  private type ParsedHeaderState[A] = (Either[Throwable, A | Tombstone], Offset)
   private type KeySize = Int
   private type ValueSize = Int
 
@@ -17,16 +21,56 @@ object DataFileDecoder {
 
   private object HeaderState {
     final case class KeyOnly(offset: Offset, keySize: KeySize, bytes: Chunk[Byte]) extends HeaderState
-    final case class KeyValue(keyHeader: KeyOnly, valueSize: ValueSize, bytes: Chunk[Byte]) extends HeaderState
+    final case class KeyValue(keyHeader: KeyOnly, valueSize: ValueSize, bytes: Chunk[Byte]) extends HeaderState {
+      def dataSize: Int = keyHeader.keySize + valueSize
+    }
     final case class Tombstone(offset: Offset, checksum: Int, keySize: KeySize, bytes: Chunk[Byte]) extends HeaderState
   }
 
+  def decodeAsFileReference[F[_]: Sync](dataFile: Path): Pipe[F, Byte, ParsedEntryFileReference] = {
+    val p = decodeKeyValueState { kvHeader =>
+      val keyHeader = kvHeader.keyHeader
+      KeyValuePull[F, (Key, EntryFileReference)](
+        keyHeader.keySize,
+        keyBytes =>
+          Pull
+            .eval(
+              decodeKeyEntryFileReference(
+                dataFile,
+                keyHeader.offset,
+                entrySize = kvHeader.dataSize,
+                bytes = keyHeader.bytes ++ kvHeader.bytes ++ keyBytes
+              )
+            )
+            .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
+      )
+    }
+
+    in => in.through(p).map(_._1)
+  }
+
   def decode[F[_]: Sync]: Pipe[F, Byte, ParsedKeyValueEntry] = {
+    decodeKeyValueState { kvHeader =>
+      val keyHeader = kvHeader.keyHeader
+      val dataSize = keyHeader.keySize + kvHeader.valueSize
+      KeyValuePull(
+        numberOfBytesFromEntryToPull = dataSize,
+        entryBytes =>
+          Pull
+            .eval(KeyValueEntryCodec.decode(keyHeader.bytes ++ kvHeader.bytes ++ entryBytes))
+            .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
+      )
+    }
+  }
+
+  private def decodeKeyValueState[F[_]: Sync, A](
+      pullKeyValue: HeaderState.KeyValue => KeyValuePull[F, A]
+  ): Pipe[F, Byte, ParsedHeaderState[A]] = {
     def go(
         s: fs2.Stream[F, Byte],
         currentOffset: Offset,
         headerState: Option[HeaderState]
-    ): Pull[F, ParsedKeyValueEntry, Unit] = {
+    ): Pull[F, ParsedHeaderState[A], Unit] = {
       headerState match
         /*
         Read the Common Header and determine if we should decode a Tombstone or Key-Value entry. Otherwise we are at
@@ -87,24 +131,54 @@ object DataFileDecoder {
           }
 
         // Read the full Key-Value entry and decode it, or error
-        case Some(HeaderState.KeyValue(keyHeader, valueSize, valueSizeBytes)) =>
-          val dataSize = keyHeader.keySize + valueSize
-          s.pull.unconsN(dataSize).flatMap {
+        case Some(kv @ HeaderState.KeyValue(keyHeader, _, _)) =>
+          val KeyValuePull(numberOfBytesFromEntryToPull, handleBytes) = pullKeyValue(kv)
+          s.pull.unconsN(numberOfBytesFromEntryToPull).flatMap {
             case Some((entryBytes, tail)) =>
-              val allBytes = keyHeader.bytes ++ valueSizeBytes ++ entryBytes
-              Pull
-                .eval(KeyValueEntryCodec.decode(allBytes))
-                .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
-                .attempt
-                .flatMap(kv => Pull.output1((kv, keyHeader.offset)))
-                >> go(tail, currentOffset = currentOffset + dataSize, headerState = None)
+              val unconsumed = kv.dataSize - numberOfBytesFromEntryToPull
+              for {
+                res <- handleBytes(entryBytes).attempt
+                _ <- Pull.output1((res, keyHeader.offset))
+                _ <- go(
+                  s = tail.drop(unconsumed),
+                  currentOffset = currentOffset + kv.dataSize,
+                  headerState = None
+                )
+              } yield ()
 
             case None =>
+              // TODO: errors, ideally include offsets in errors
               Pull.raiseError(Errors.Startup.MissingKeyValueEntry)
           }
     }
 
     in => go(in, currentOffset = 0, headerState = None).stream
   }
+
+  private def decodeKeyEntryFileReference[F[_]: Sync](
+      filePath: Path,
+      offset: Offset,
+      entrySize: Int,
+      bytes: Chunk[Byte]
+  ): F[(Key, EntryFileReference)] = Sync[F].defer {
+    val bb = bytes.toByteBuffer
+    val checksum = bb.getInt
+    val _ = bb.get // skip tombstone
+
+    // TODO: how to enforce CRC? Probably need to read whole value
+    Sync[F].delay {
+      val keySize = bb.getInt
+      val valueSize = bb.getInt
+      val key = Array.fill(keySize)(0.toByte)
+      bb.get(key)
+
+      (Key(key), EntryFileReference(filePath, offset, KeyValueEntryCodec.HeaderSize + entrySize))
+    }
+  }
+
+  private case class KeyValuePull[F[_], A](
+      numberOfBytesFromEntryToPull: Int,
+      handleBytes: Chunk[Byte] => Pull[F, Nothing, A]
+  )
 
 }
