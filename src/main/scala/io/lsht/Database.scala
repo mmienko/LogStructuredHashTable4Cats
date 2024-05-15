@@ -62,6 +62,7 @@ object Database {
 
               index <- Ref[F].of(Map.empty[Key, EntryFileReference])
 
+              // TODO: fold with map, rather then ref
               counts <- dataFiles.traverse { dataFile =>
                 Files[F]
                   .readAll(dataFile)
