@@ -6,7 +6,7 @@ import cats.syntax.all.*
 import fs2.{Chunk, Pipe, Pull, Stream}
 import fs2.io.file.{Files, Flags, Path, ReadCursor, WriteCursor}
 import io.lsht.codec.{HintCodec, HintFileDecoder, ValuesCodec}
-import io.lsht.{KeyValueEntry, given_Ordering_Path}
+import io.lsht.{KeyValue, given_Ordering_Path}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -15,7 +15,7 @@ object CompactionFilesUtil {
   def writeKeyValueEntries[F[_]: Async](
       databaseDirectory: Path,
       timestamp: FiniteDuration
-  ): Pipe[F, KeyValueEntry, Unit] = {
+  ): Pipe[F, KeyValue, Unit] = {
     val fileTimestamp = timestamp.toMillis.toString
     in =>
       in.through(writeValuesAndGiveHints(databaseDirectory / s"values.$fileTimestamp.db"))
@@ -24,7 +24,7 @@ object CompactionFilesUtil {
         .through(Files[F].writeAll(databaseDirectory / s"hint.$fileTimestamp.db", Flags.Append))
   }
 
-  def readKeyValueEntries[F[_]: Async](compactedFiles: CompactedFiles): Stream[F, Either[Throwable, KeyValueEntry]] =
+  def readKeyValueEntries[F[_]: Async](compactedFiles: CompactedFiles): Stream[F, Either[Throwable, KeyValue]] =
     Files[F]
       .readAll(compactedFiles.hint)
       .through(HintFileDecoder.decode)
@@ -75,8 +75,8 @@ object CompactionFilesUtil {
           }
       }
 
-  private def writeValuesAndGiveHints[F[_]: Async](path: Path): Pipe[F, KeyValueEntry, (KeyValueEntry, Offset)] = {
-    def go(s: Stream[F, KeyValueEntry], cursor: WriteCursor[F]): Pull[F, (KeyValueEntry, Offset), Unit] =
+  private def writeValuesAndGiveHints[F[_]: Async](path: Path): Pipe[F, KeyValue, (KeyValue, Offset)] = {
+    def go(s: Stream[F, KeyValue], cursor: WriteCursor[F]): Pull[F, (KeyValue, Offset), Unit] =
       s.pull.uncons1.flatMap {
         case Some((entry, tail)) =>
           Pull
@@ -97,14 +97,14 @@ object CompactionFilesUtil {
 
   private def readValuesAndCombine[F[_]: Async](
       hintFile: Path
-  ): Pipe[F, Either[Throwable, EntryHint], Either[Throwable, KeyValueEntry]] = {
+  ): Pipe[F, Either[Throwable, EntryHint], Either[Throwable, KeyValue]] = {
     def go(
         s: Stream[F, Either[Throwable, EntryHint]],
         cursor: ReadCursor[F]
-    ): Pull[F, Either[Throwable, KeyValueEntry], Unit] =
+    ): Pull[F, Either[Throwable, KeyValue], Unit] =
       s.pull.uncons1.flatMap {
         case Some((Left(error), tail)) =>
-          Pull.output1(error.asLeft[KeyValueEntry]) >> go(tail, cursor)
+          Pull.output1(error.asLeft[KeyValue]) >> go(tail, cursor)
 
         case Some((Right(hint), tail)) =>
           cursor
@@ -117,10 +117,10 @@ object CompactionFilesUtil {
                 ValuesCodec
                   .decode(bytes)
                   .attempt
-                  .map(_.map(value => KeyValueEntry(hint.key, value)))
+                  .map(_.map(value => KeyValue(hint.key, value)))
 
               case None =>
-                new Throwable("Value is missing").asLeft[KeyValueEntry].pure[F]
+                new Throwable("Value is missing").asLeft[KeyValue].pure[F]
             }
             .flatMap(Pull.output1) >> go(tail, cursor)
 

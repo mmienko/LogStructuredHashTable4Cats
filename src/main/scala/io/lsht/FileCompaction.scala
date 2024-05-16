@@ -6,7 +6,7 @@ import cats.effect.{Async, Clock}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError}
 import io.lsht.codec.DataFileDecoder.Tombstone
-import io.lsht.codec.{DataFileDecoder, HintFileDecoder, KeyValueEntryCodec, ValuesCodec}
+import io.lsht.codec.{DataFileDecoder, HintFileDecoder, KeyValueCodec, ValuesCodec}
 import fs2.*
 import fs2.io.file.*
 
@@ -15,7 +15,7 @@ import scala.collection.immutable.VectorMap
 // TODO: don't expose to public api
 object FileCompaction {
 
-  type EntryByFile = (Path, Offset, KeyValueEntry | Tombstone)
+  type RecordByFile = (Path, Offset, KeyValue | Tombstone)
 
   // TODO: immutable.VectorMap vs mutable.LinkedListHashMap
   private val EmptyIndex = VectorMap.empty[Key, HintFileReference | KeyValueFileReference]
@@ -41,7 +41,7 @@ object FileCompaction {
             .through(HintFileDecoder.decode)
             .evalMapFilter {
               case Left(error) =>
-                Console[F].println(s"Could not read key-value entry. $error").as(none[(Key, HintFileReference)])
+                Console[F].println(s"Could not read key-value entry hint. $error").as(none[(Key, HintFileReference)])
 
               case Right(EntryHint(key, positionInFile, valueSize)) =>
                 (key, HintFileReference(positionInFile, valueSize)).some.pure[F]
@@ -53,7 +53,7 @@ object FileCompaction {
 
         (compactedFiles, compactedIndex) = compactedFilesWithIndex.unzip
 
-        entryReferences <- Stream
+        keyValueReferences <- Stream
           .emits(immutableDataFiles)
           .flatMap { dataFile =>
             Files[F]
@@ -71,17 +71,17 @@ object FileCompaction {
           }
           .compile
           .fold(compactedIndex.getOrElse(EmptyIndex)) {
-            case (index, (key, entry: KeyValueFileReference)) =>
-              index.updated(key, entry)
+            case (index, (key, ref: KeyValueFileReference)) =>
+              index.updated(key, ref)
 
             case (index, key: Tombstone) =>
               index.removed(key)
           }
 
-        _ <- Applicative[F].whenA(entryReferences.nonEmpty) {
+        _ <- Applicative[F].whenA(keyValueReferences.nonEmpty) {
           Stream
-            .fromIterator(entryReferences.iterator, chunkSize = 100)
-            .through(readKeyValueEntryFromDataFile(compactedFiles.map(_.values)))
+            .fromIterator(keyValueReferences.iterator, chunkSize = 100)
+            .through(readKeyValueFromFileReferences(compactedFiles.map(_.values)))
             .through(CompactionFilesUtil.writeKeyValueEntries(databaseDirectory, now))
             .compile
             .drain *>
@@ -113,17 +113,17 @@ object FileCompaction {
     .sortBy(_._2)
     .map(_._1)
 
-  private def readKeyValueEntryFromDataFile[F[_]: Async](valuesFile: Option[Path]): Pipe[
+  private def readKeyValueFromFileReferences[F[_]: Async](valuesFile: Option[Path]): Pipe[
     F,
     (Key, HintFileReference | KeyValueFileReference),
-    KeyValueEntry
+    KeyValue
   ] = {
     def go(
         s: Stream[F, (Key, HintFileReference | KeyValueFileReference)],
         valuesFileCursor: Option[ReadCursor[F]],
         fileHotSwap: Hotswap[F, ReadCursor[F]],
         location: Option[ReadCursorLocation[F]]
-    ): Pull[F, KeyValueEntry, Unit] =
+    ): Pull[F, KeyValue, Unit] =
       s.pull.uncons1.flatMap {
         // The Stream of Entries is ordered by File, so once we swap to a new file, we no longer read any of the old files.
         case Some(((key, HintFileReference(positionInFile, valueSize)), tail)) =>
@@ -143,7 +143,7 @@ object FileCompaction {
 
             value <- Pull.eval(ValuesCodec.decode(bytes))
 
-            _ <- Pull.output1(KeyValueEntry(key, value))
+            _ <- Pull.output1(KeyValue(key, value))
 
             _ <- go(tail, valuesFileCursor, fileHotSwap, location)
           } yield ()
@@ -171,9 +171,9 @@ object FileCompaction {
               )
             }
 
-            entry <- Pull.eval(KeyValueEntryCodec.decode(bytes))
+            kv <- Pull.eval(KeyValueCodec.decode(bytes))
 
-            _ <- Pull.output1(entry)
+            _ <- Pull.output1(kv)
 
             _ <- go(tail, valuesFileCursor, fileHotSwap, location.some)
           } yield ()
@@ -186,8 +186,8 @@ object FileCompaction {
       for {
         fileHotSwap <- Stream.resource(Hotswap.create[F, ReadCursor[F]])
         valuesFileCursor <- Stream.resource(valuesFile.traverse(Files[F].readCursor(_, Flags.Read)))
-        keyValueEntry <- go(in, valuesFileCursor, fileHotSwap, none[ReadCursorLocation[F]]).stream
-      } yield keyValueEntry
+        kv <- go(in, valuesFileCursor, fileHotSwap, none[ReadCursorLocation[F]]).stream
+      } yield kv
   }
 
   private final case class ReadCursorLocation[F[_]](

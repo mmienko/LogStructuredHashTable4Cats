@@ -3,15 +3,15 @@ package io.lsht.codec
 import cats.effect.IO
 import fs2.Chunk
 import io.lsht.codec.CodecCommons.*
-import io.lsht.codec.KeyValueEntryCodecTest.expect
-import io.lsht.{EntryHint, Key, KeyValueEntry}
+import io.lsht.codec.KeyValueCodecTest$.expect
+import io.lsht.{EntryHint, Key, KeyValue}
 import weaver.*
 
 object HintCodecTest extends SimpleIOSuite {
 
-  test("Encodes Entry with offset and non-empty key and non-empty value") {
+  test("Encodes KeyValue with offset and non-empty key and non-empty value") {
     for {
-      bb <- HintCodec.encode(KeyValueEntry(Key("key"), "value".getBytes), valuePosition = 1971L)
+      bb <- HintCodec.encode(KeyValue(Key("key"), "value".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -30,9 +30,9 @@ object HintCodecTest extends SimpleIOSuite {
     } yield expect.eql(key, "key")
   }
 
-  test("Encodes Entry with offset and non-empty key and empty value") {
+  test("Encodes KeyValue with offset and non-empty key and empty value") {
     for {
-      bb <- HintCodec.encode(KeyValueEntry(Key("key"), "".getBytes), valuePosition = 1971L)
+      bb <- HintCodec.encode(KeyValue(Key("key"), "".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -51,9 +51,9 @@ object HintCodecTest extends SimpleIOSuite {
     } yield expect.eql(key, "key")
   }
 
-  test("Encodes Entry with offset and empty key and non-empty value") {
+  test("Encodes KeyValue with offset and empty key and non-empty value") {
     for {
-      bb <- HintCodec.encode(KeyValueEntry(Key(""), "value".getBytes), valuePosition = 1971L)
+      bb <- HintCodec.encode(KeyValue(Key(""), "value".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -72,9 +72,9 @@ object HintCodecTest extends SimpleIOSuite {
     } yield expect.eql(key, "")
   }
 
-  test("Encodes Entry with offset and empty key and empty value") {
+  test("Encodes KeyValue with offset and empty key and empty value") {
     for {
-      bb <- HintCodec.encode(KeyValueEntry(Key(""), "".getBytes), valuePosition = 1971L)
+      bb <- HintCodec.encode(KeyValue(Key(""), "".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -97,7 +97,7 @@ object HintCodecTest extends SimpleIOSuite {
 
   test("decode bytes to EntryHint") {
     HintCodec
-      .encode(KeyValueEntry(Key("key"), "value".getBytes), valuePosition = 1971L)
+      .encode(KeyValue(Key("key"), "value".getBytes), valuePosition = 1971L)
       .map(Chunk.byteBuffer)
       .flatMap(HintCodec.decode[IO])
       .map { case EntryHint(key, positionInFile, valueSize) =>

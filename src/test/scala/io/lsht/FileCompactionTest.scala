@@ -7,7 +7,7 @@ import fs2.Chunk
 import fs2.io.file.{Files, Flags, Path}
 import io.lsht.CompactionFilesUtil.attemptListCompactionFiles
 import io.lsht.codec.DataFileDecoder.Tombstone
-import io.lsht.codec.{KeyValueEntryCodec, TombstoneEncoder}
+import io.lsht.codec.{KeyValueCodec, TombstoneEncoder}
 import weaver.*
 
 import scala.concurrent.duration.*
@@ -40,7 +40,7 @@ object FileCompactionTest extends SimpleIOSuite {
       val `data.1.db` = dir / "data.1.db"
       for {
         _ <- Files[IO].createFile(`data.1.db`)
-        _ <- appendEntriesToDataFile(`data.1.db`, KeyValueEntry(Key("key"), "value".getBytes))
+        _ <- appendEntriesToDataFile(`data.1.db`, KeyValue(Key("key"), "value".getBytes))
         _ <- Files[IO].createFile(dir / "data.2.db")
         _ <- FileCompaction.run[IO](dir)
         files <- getCompactionFiles1(dir)
@@ -109,8 +109,8 @@ object FileCompactionTest extends SimpleIOSuite {
         _ <- fs2.Stream
           .emits(
             List(
-              KeyValueEntry(Key("key1"), "value1".getBytes),
-              KeyValueEntry(Key("key2"), "value1".getBytes)
+              KeyValue(Key("key1"), "value1".getBytes),
+              KeyValue(Key("key2"), "value1".getBytes)
             )
           )
           .through(CompactionFilesUtil.writeKeyValueEntries(dir, timestamp = 1.millis))
@@ -118,8 +118,8 @@ object FileCompactionTest extends SimpleIOSuite {
           .drain
         _ <- appendEntriesToDataFile(
           dir / "data.2.db",
-          KeyValueEntry(Key("key1"), "value2".getBytes),
-          KeyValueEntry(Key("key3"), "value2".getBytes)
+          KeyValue(Key("key1"), "value2".getBytes),
+          KeyValue(Key("key3"), "value2".getBytes)
         )
         _ <- Files[IO].createFile(dir / "data.3.db") // active file
 
@@ -133,9 +133,9 @@ object FileCompactionTest extends SimpleIOSuite {
           .toList
       } yield matches(entries) { case k1 :: k2 :: k3 :: Nil =>
         expect.all(
-          k1 === KeyValueEntry(Key("key1"), "value2".getBytes),
-          k2 === KeyValueEntry(Key("key2"), "value1".getBytes),
-          k3 === KeyValueEntry(Key("key3"), "value2".getBytes)
+          k1 === KeyValue(Key("key1"), "value2".getBytes),
+          k2 === KeyValue(Key("key2"), "value1".getBytes),
+          k3 === KeyValue(Key("key3"), "value2".getBytes)
         )
       }
     }
@@ -176,7 +176,7 @@ object FileCompactionTest extends SimpleIOSuite {
 
         _ <- appendEntriesToDataFile(
           file = dir / "data.1.db",
-          keyValueEntries = (0 until 5).map(i => KeyValueEntry(Key(s"key$i"), "value".getBytes))*
+          keyValueEntries = (0 until 5).map(i => KeyValue(Key(s"key$i"), "value".getBytes))*
         )
         _ <- FileCompaction.run[IO](dir)
 
@@ -184,8 +184,8 @@ object FileCompactionTest extends SimpleIOSuite {
         entriesOrErrors <- CompactionFilesUtil.readKeyValueEntries[IO](files).compile.toList
       } yield expect(entriesOrErrors.length === 5) and
         forEach(entriesOrErrors.zipWithIndex) { case (entriesOrError, i) =>
-          whenSuccess(entriesOrError) { entry =>
-            expect(entry === KeyValueEntry(Key(s"key$i"), "value".getBytes))
+          whenSuccess(entriesOrError) { kv =>
+            expect(kv === KeyValue(Key(s"key$i"), "value".getBytes))
           }
         }
     }
@@ -202,8 +202,8 @@ object FileCompactionTest extends SimpleIOSuite {
           file = dir / "data.1.db",
           keyValueEntries = (0 until 5).flatMap { i =>
             List(
-              KeyValueEntry(Key(s"key$i"), "value0".getBytes),
-              KeyValueEntry(Key(s"key$i"), "value1".getBytes)
+              KeyValue(Key(s"key$i"), "value0".getBytes),
+              KeyValue(Key(s"key$i"), "value1".getBytes)
             )
           }*
         )
@@ -213,8 +213,8 @@ object FileCompactionTest extends SimpleIOSuite {
         entriesOrErrors <- CompactionFilesUtil.readKeyValueEntries[IO](files).compile.toList
       } yield expect(entriesOrErrors.length === 5) and
         forEach(entriesOrErrors.zipWithIndex) { case (entriesOrError, i) =>
-          whenSuccess(entriesOrError) { entry =>
-            expect(entry === KeyValueEntry(Key(s"key$i"), "value1".getBytes))
+          whenSuccess(entriesOrError) { kv =>
+            expect(kv === KeyValue(Key(s"key$i"), "value1".getBytes))
           }
         }
     }
@@ -229,7 +229,7 @@ object FileCompactionTest extends SimpleIOSuite {
         // TODO: can be moved to syntax file
         _ <- appendEntriesToDataFile(
           file = dir / "data.1.db",
-          keyValueEntries = (0 until 5).map(i => KeyValueEntry(Key(s"key$i"), "value".getBytes))*
+          keyValueEntries = (0 until 5).map(i => KeyValue(Key(s"key$i"), "value".getBytes))*
         )
         _ <- appendTombstonesToDataFile(
           file = dir / "data.1.db",
@@ -242,9 +242,9 @@ object FileCompactionTest extends SimpleIOSuite {
       } yield entriesOrErrors match
         case key1 :: key3 :: Nil =>
           whenSuccess(key1) { key =>
-            expect(key === KeyValueEntry(Key("key1"), "value".getBytes))
+            expect(key === KeyValue(Key("key1"), "value".getBytes))
           } and whenSuccess(key3) { key =>
-            expect(key === KeyValueEntry(Key("key3"), "value".getBytes))
+            expect(key === KeyValue(Key("key3"), "value".getBytes))
           }
 
         case _ =>
@@ -263,8 +263,8 @@ object FileCompactionTest extends SimpleIOSuite {
           file = dataFile1,
           keyValueEntries = (0 until 5).flatMap { i =>
             List(
-              KeyValueEntry(Key(s"key$i"), "value0".getBytes),
-              KeyValueEntry(Key(s"key$i"), "value1".getBytes)
+              KeyValue(Key(s"key$i"), "value0".getBytes),
+              KeyValue(Key(s"key$i"), "value1".getBytes)
             )
           }*
         )
@@ -276,17 +276,17 @@ object FileCompactionTest extends SimpleIOSuite {
         dataFile2 = dir / "data.2.db"
         _ <- appendEntriesToDataFile(
           file = dataFile2,
-          keyValueEntries = (0 until 5).map(i => KeyValueEntry(Key(s"key${i + 5}"), "value0".getBytes))*
+          keyValueEntries = (0 until 5).map(i => KeyValue(Key(s"key${i + 5}"), "value0".getBytes))*
         )
 
         dataFile3 = dir / "data.3.db"
         _ <- appendEntriesToDataFile(
           file = dataFile3,
           keyValueEntries = List(
-            KeyValueEntry(Key(s"key0"), "value2".getBytes),
-            KeyValueEntry(Key(s"key4"), "value2".getBytes), // adding back in
-            KeyValueEntry(Key(s"key5"), "value2".getBytes),
-            KeyValueEntry(Key(s"key9"), "value2".getBytes)
+            KeyValue(Key(s"key0"), "value2".getBytes),
+            KeyValue(Key(s"key4"), "value2".getBytes), // adding back in
+            KeyValue(Key(s"key5"), "value2".getBytes),
+            KeyValue(Key(s"key9"), "value2".getBytes)
           )*
         )
         _ <- appendTombstonesToDataFile(
@@ -301,17 +301,17 @@ object FileCompactionTest extends SimpleIOSuite {
       } yield entriesOrErrors.sortBy(_.fold(_ => "", _.key.show)) match
         case key1 :: key3 :: key4 :: key6 :: key8 :: key9 :: Nil =>
           whenSuccess(key1) { key =>
-            expect.eql(KeyValueEntry(Key("key1"), "value1".getBytes), key)
+            expect.eql(KeyValue(Key("key1"), "value1".getBytes), key)
           } and whenSuccess(key3) { key =>
-            expect.eql(KeyValueEntry(Key("key3"), "value1".getBytes), key)
+            expect.eql(KeyValue(Key("key3"), "value1".getBytes), key)
           } and whenSuccess(key4) { key =>
-            expect.eql(KeyValueEntry(Key("key4"), "value2".getBytes), key)
+            expect.eql(KeyValue(Key("key4"), "value2".getBytes), key)
           } and whenSuccess(key6) { key =>
-            expect.eql(KeyValueEntry(Key("key6"), "value0".getBytes), key)
+            expect.eql(KeyValue(Key("key6"), "value0".getBytes), key)
           } and whenSuccess(key8) { key =>
-            expect.eql(KeyValueEntry(Key("key8"), "value0".getBytes), key)
+            expect.eql(KeyValue(Key("key8"), "value0".getBytes), key)
           } and whenSuccess(key9) { key =>
-            expect.eql(KeyValueEntry(Key("key9"), "value2".getBytes), key)
+            expect.eql(KeyValue(Key("key9"), "value2".getBytes), key)
           }
 
         case _ =>
@@ -321,16 +321,16 @@ object FileCompactionTest extends SimpleIOSuite {
   }
 
   // TODO: consolidate w/ src and move to Utils files
-  private def appendEntriesToDataFile(file: Path, keyValueEntries: KeyValueEntry*): IO[Unit] =
+  private def appendEntriesToDataFile(file: Path, keyValueEntries: KeyValue*): IO[Unit] =
     appendToDataFile(file, keyValueEntries.map(_.asRight[Tombstone])*)
 
   private def appendTombstonesToDataFile(file: Path, tombstones: Tombstone*): IO[Unit] =
-    appendToDataFile(file, tombstones.map(_.asLeft[KeyValueEntry])*)
+    appendToDataFile(file, tombstones.map(_.asLeft[KeyValue])*)
 
-  private def appendToDataFile(file: Path, keyValueEntries: Either[Tombstone, KeyValueEntry]*): IO[Unit] =
+  private def appendToDataFile(file: Path, keyValueEntries: Either[Tombstone, KeyValue]*): IO[Unit] =
     fs2.Stream
       .evals(keyValueEntries.pure[IO])
-      .evalMap(_.fold(TombstoneEncoder.encode, KeyValueEntryCodec.encode))
+      .evalMap(_.fold(TombstoneEncoder.encode, KeyValueCodec.encode))
       .mapChunks(_.flatMap(Chunk.byteBuffer))
       .through(Files[IO].writeAll(file, Flags.Append))
       .compile
@@ -365,5 +365,5 @@ object FileCompactionTest extends SimpleIOSuite {
   // TODO: use expect.eql where appropriate
   given Show[Array[Byte]] = Show.show(new String(_))
   given Show[Key] = Show.show(k => s"Key(${k.value.show})")
-  given Show[KeyValueEntry] = Show.show(e => s"KV(${e.key.show}, ${e.value.show})")
+  given Show[KeyValue] = Show.show(e => s"KV(${e.key.show}, ${e.value.show})")
 }

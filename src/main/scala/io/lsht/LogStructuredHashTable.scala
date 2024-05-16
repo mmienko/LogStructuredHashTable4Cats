@@ -7,7 +7,7 @@ import cats.{Applicative, ApplicativeError, Monad, Monoid, Semigroup}
 import fs2.io.file.{Files, Flags, Path}
 import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
-import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
+import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
 
 class LogStructuredHashTable[F[_]: Async] private[lsht] (
     queue: QueueSink[F, WriteCommand[F]],
@@ -33,7 +33,7 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
                 .raiseWhen(bytes.size != entrySize)(
                   Errors.Read.CorruptedDataFile
                 )
-              putValue <- KeyValueEntryCodec.decode(bytes)
+              putValue <- KeyValueCodec.decode(bytes)
             } yield putValue.value.some
           }
 

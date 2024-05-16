@@ -4,8 +4,8 @@ import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.Path
 import io.lsht.codec.CodecCommons.ChecksumSize
-import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
-import io.lsht.{KeyValueFileReference, Key, KeyValueEntry}
+import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
+import io.lsht.{KeyValueFileReference, Key, KeyValue}
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -14,18 +14,18 @@ object DataFileDecoderTest extends SimpleIOSuite {
 
   private val UnusedTestDataFile = Path("/tmp/unused-test-datafile.db")
 
-  test("decode stream of bytes for a single KeyValueEntry") {
-    val entry = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
+  test("decode stream of bytes for a single KeyValue") {
+    val kv = KeyValue(Key("key1".getBytes), "value1".getBytes)
 
     fs2.Stream
-      .evalUnChunk(KeyValueEntryCodec.encode(entry).map(Chunk.byteBuffer))
+      .evalUnChunk(KeyValueCodec.encode(kv).map(Chunk.byteBuffer))
       .through(DataFileDecoder.decode)
       .compile
       .lastOrError
       .map { case (result, offset) =>
-        matches(result) { case Right(resultEntry: KeyValueEntry) =>
-          expect(new String(resultEntry.key.value) === "key1") and
-            expect(new String(resultEntry.value) === "value1")
+        matches(result) { case Right(kv: KeyValue) =>
+          expect(new String(kv.key.value) === "key1") and
+            expect(new String(kv.value) === "value1")
         } and expect(offset === 0)
       }
   }
@@ -45,11 +45,11 @@ object DataFileDecoderTest extends SimpleIOSuite {
       }
   }
 
-  test("decode stream of bytes for multiple KeyValueEntry's") {
+  test("decode stream of bytes for multiple KeyValue's") {
     // TODO: tombstones
-    val expectedKv1 = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
-    val expectedKv2 = KeyValueEntry(Key("key2".getBytes), "value2".getBytes)
-    val expectedKv3 = KeyValueEntry(Key("key3".getBytes), "value3".getBytes)
+    val expectedKv1 = KeyValue(Key("key1".getBytes), "value1".getBytes)
+    val expectedKv2 = KeyValue(Key("key2".getBytes), "value2".getBytes)
+    val expectedKv3 = KeyValue(Key("key3".getBytes), "value3".getBytes)
     val keyValueEntries = List(
       expectedKv1,
       expectedKv2,
@@ -59,43 +59,43 @@ object DataFileDecoderTest extends SimpleIOSuite {
     for {
       parsedKeyValueEntries <- fs2.Stream
         .emits(keyValueEntries)
-        .evalMap(KeyValueEntryCodec.encode)
+        .evalMap(KeyValueCodec.encode)
         .mapChunks(_.flatMap(Chunk.byteBuffer))
         .through(DataFileDecoder.decode)
         .compile
         .toList
     } yield matches(parsedKeyValueEntries) {
-      case (Right(kv1: KeyValueEntry), offset1) ::
-          (Right(kv2: KeyValueEntry), offset2) ::
-          (Right(kv3: KeyValueEntry), offset3) ::
+      case (Right(kv1: KeyValue), offset1) ::
+          (Right(kv2: KeyValue), offset2) ::
+          (Right(kv3: KeyValue), offset3) ::
           Nil =>
         expect.all(
           kv1 === expectedKv1,
           kv2 === expectedKv2,
           kv3 === expectedKv3,
           offset1 === 0L,
-          offset2 === KeyValueEntryCodec.HeaderSize + 10,
-          offset3 === (KeyValueEntryCodec.HeaderSize + 10) * 2
+          offset2 === KeyValueCodec.HeaderSize + 10,
+          offset3 === (KeyValueCodec.HeaderSize + 10) * 2
         )
     }
   }
 
   test("decode stream of bytes for KeyFileReference") {
     // TODO: tombstones
-    val expectedKv1 = KeyValueEntry(Key("key1".getBytes), "value1".getBytes)
-    val expectedKv2 = KeyValueEntry(Key("key2".getBytes), "value2".getBytes)
-    val expectedKv3 = KeyValueEntry(Key("key3".getBytes), "value3".getBytes)
+    val expectedKv1 = KeyValue(Key("key1".getBytes), "value1".getBytes)
+    val expectedKv2 = KeyValue(Key("key2".getBytes), "value2".getBytes)
+    val expectedKv3 = KeyValue(Key("key3".getBytes), "value3".getBytes)
     val keyValueEntries = List(
       expectedKv1,
       expectedKv2,
       expectedKv3
     )
-    val entrySize = KeyValueEntryCodec.HeaderSize + 10
+    val recordSize = KeyValueCodec.HeaderSize + 10
 
     for {
       parsedFileReferences <- fs2.Stream
         .emits(keyValueEntries)
-        .evalMap(KeyValueEntryCodec.encode)
+        .evalMap(KeyValueCodec.encode)
         .mapChunks(_.flatMap(Chunk.byteBuffer))
         .through(DataFileDecoder.decodeAsFileReference(UnusedTestDataFile))
         .compile
@@ -112,17 +112,17 @@ object DataFileDecoderTest extends SimpleIOSuite {
           fileRef1 === KeyValueFileReference(
             UnusedTestDataFile,
             positionInFile = 0,
-            entrySize
+            recordSize
           ),
           fileRef2 === KeyValueFileReference(
             UnusedTestDataFile,
-            positionInFile = KeyValueEntryCodec.HeaderSize + 10,
-            entrySize
+            positionInFile = KeyValueCodec.HeaderSize + 10,
+            recordSize
           ),
           fileRef3 === KeyValueFileReference(
             UnusedTestDataFile,
-            positionInFile = (KeyValueEntryCodec.HeaderSize + 10) * 2,
-            entrySize
+            positionInFile = (KeyValueCodec.HeaderSize + 10) * 2,
+            recordSize
           )
         )
     }

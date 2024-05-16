@@ -4,7 +4,7 @@ import cats.ApplicativeError
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.{EntryHint, Errors, KeyValueEntry, Offset, Key}
+import io.lsht.{EntryHint, Errors, KeyValue, Offset, Key}
 
 import java.nio.ByteBuffer
 
@@ -15,17 +15,17 @@ object HintCodec {
     4 + // 4-byte Value Size
     8 // 8-byte Value Offset
 
-  def encode[F[_]: Sync](entry: KeyValueEntry, valuePosition: Offset): F[ByteBuffer] = {
-    val totalSize = HeaderSize + entry.key.length
+  def encode[F[_]: Sync](kv: KeyValue, valuePosition: Offset): F[ByteBuffer] = {
+    val totalSize = HeaderSize + kv.key.length
     Sync[F]
       .delay {
         ByteBuffer
           .allocate(totalSize)
           .putInt(0) // zero out CRC
-          .putInt(entry.key.length)
-          .putInt(entry.value.length)
+          .putInt(kv.key.length)
+          .putInt(kv.value.length)
           .putLong(valuePosition)
-          .put(entry.key.value)
+          .put(kv.key.value)
           .rewind()
       }
       .flatTap(CodecUtils.addCrc(_, totalSize))

@@ -31,14 +31,16 @@ Loading from disk reads the _hint_ file, _inactive data files_, and _active data
 
 s/_hint_/_keys_ or s/_hint_/_keys_with_value_references_? 
 
-A _key_ _value_ pair is called an _entry_. Mhh, entry sounds overused.
+A _key_ _value_ pair is called an _KeyValue_. Mhh, entry sounds overused.
 
 Deletions create _tombstones_, special entries in _data files_ that mark a key for pruning during _compaction_, so
 that the key doesn't enter the _compacted files_. Thus is won't be reloaded in case _DB_ stops and crashes.
 
 The _HT_ is a list of tuples, _key_ and _EntryFileReference_. s/_EntryFileReference_/_FileReference_ OR s/_EntryFileReference_/_KeyValueEntryFileReference_
 
-_KeyValueEntry_ ...
+Update to private final case class KeyValueFileReference2(file: Path, offset: Offset, length: Int)
+
+TODO: What to call `KeyValue | Tombstone`? FileRecord? Only used in implementation context.
 
 _HintFileReference_ ...
 

@@ -8,7 +8,7 @@ import cats.{Applicative, ApplicativeError, Monad}
 import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
 import io.lsht.LogStructuredHashTable.*
-import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
+import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
 
 // TODO: just use database instead of HashTable object
 object Database {
@@ -69,17 +69,17 @@ object Database {
                   .through(DataFileDecoder.decode[F])
                   .evalMap {
                     case (Left(err), offset) =>
-                      // whether entry or tombstone should be in error
+                      // whether kv or tombstone should be in error
                       Console[F].println(err.toString + s" at offset $offset")
 
-                    case (Right(entry: KeyValueEntry), offset) =>
+                    case (Right(kv: KeyValue), offset) =>
                       index.update(
                         _.updated(
-                          entry.key,
+                          kv.key,
                           KeyValueFileReference(
                             dataFile,
                             positionInFile = offset,
-                            entrySize = KeyValueEntryCodec.size(entry)
+                            entrySize = KeyValueCodec.size(kv)
                           )
                         )
                       )
@@ -184,16 +184,16 @@ object Database {
       cmd: WriteCommand[F]
   ): F[Option[BytesToFile[F]]] =
     cmd match // tODO: guaranteeCommandCompletes
-      case WriteCommand.Put(keyValueEntry, signal) =>
-        KeyValueEntryCodec
-          .encode(keyValueEntry)
+      case WriteCommand.Put(kv, signal) =>
+        KeyValueCodec
+          .encode(kv)
           .map(bytes =>
             BytesToFile(
               bytes,
               onWrite = (fileOffset, writerFile) =>
                 index.update(
                   _.updated(
-                    keyValueEntry.key,
+                    kv.key,
                     KeyValueFileReference(
                       filePath = writerFile,
                       positionInFile = fileOffset,

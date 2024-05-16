@@ -3,7 +3,7 @@ package io.lsht
 import weaver._
 import cats.syntax.all._
 
-object KeyValueEntryTest extends SimpleIOSuite {
+object KeyValueTest$ extends SimpleIOSuite {
 
   pureTest("key equality") {
     val bytes = "hi".getBytes

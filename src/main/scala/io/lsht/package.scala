@@ -24,16 +24,18 @@ object Key {
 }
 
 type Value = Array[Byte]
-private type Offset = Long
-private type WriteResult = Unit | Throwable
 
-private final case class KeyValueEntry(key: Key, value: Value) {
+private final case class KeyValue(key: Key, value: Value) {
   def size: Int = key.length + value.length
 }
 
-object KeyValueEntry {
-  given Eq[KeyValueEntry] = Eq.and(Eq.by(_.key), Eq.by(_.value))
+object KeyValue {
+  given Eq[KeyValue] = Eq.and(Eq.by(_.key), Eq.by(_.value))
 }
+
+private type Offset = Long
+
+private type WriteResult = Unit | Throwable
 
 private sealed abstract class WriteCommand[F[_]](signal: Deferred[F, WriteResult]) extends Product with Serializable {
   def waitUntilComplete: F[WriteResult] = signal.get
@@ -43,17 +45,17 @@ private sealed abstract class WriteCommand[F[_]](signal: Deferred[F, WriteResult
 
 object WriteCommand {
   final case class Put[F[_]](
-      keyValueEntry: KeyValueEntry,
+      keyValue: KeyValue,
       signal: Deferred[F, WriteResult]
   ) extends WriteCommand[F](signal) {
-    def key: Key = keyValueEntry.key
-    def value: Value = keyValueEntry.value
-    def entrySize: Int = keyValueEntry.size
+    def key: Key = keyValue.key
+    def value: Value = keyValue.value
+    def entrySize: Int = keyValue.size
   }
 
   object Put {
     def apply[F[_]](key: Key, value: Value)(implicit F: GenConcurrent[F, ?]): F[Put[F]] =
-      Deferred[F, WriteResult].map(Put(KeyValueEntry(key, value), _))
+      Deferred[F, WriteResult].map(Put(KeyValue(key, value), _))
   }
 
   final case class Delete[F[_]](

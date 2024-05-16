@@ -2,15 +2,15 @@ package io.lsht.codec
 
 import cats.effect.IO
 import fs2.Chunk
-import io.lsht.{EntryHint, Key, KeyValueEntry}
+import io.lsht.{EntryHint, Key, KeyValue}
 import weaver.*
 
 object HintFileDecoderTest extends SimpleIOSuite {
 
-  test("decode stream of bytes for a single KeyValueEntry") {
+  test("decode stream of bytes for a single KeyValue") {
     val key = Key("key")
     fs2.Stream
-      .eval(HintCodec.encode[IO](KeyValueEntry(key, "value".getBytes), valuePosition = 0))
+      .eval(HintCodec.encode[IO](KeyValue(key, "value".getBytes), valuePosition = 0))
       .mapChunks(_.flatMap(Chunk.byteBuffer))
       .through(HintFileDecoder.decode)
       .compile
@@ -20,12 +20,12 @@ object HintFileDecoderTest extends SimpleIOSuite {
       })
   }
 
-  test("decode stream of bytes for multiple KeyValueEntry's") {
+  test("decode stream of bytes for multiple KeyValue's") {
     fs2.Stream
-      .emits((0 until 5).map(i => KeyValueEntry(Key(s"key$i"), "value".getBytes)).toList)
+      .emits((0 until 5).map(i => KeyValue(Key(s"key$i"), "value".getBytes)).toList)
       .zipWithIndex
       .covary[IO]
-      .evalMap { case (entry, i) => HintCodec.encode[IO](entry, valuePosition = i * 10) }
+      .evalMap { case (kv, i) => HintCodec.encode[IO](kv, valuePosition = i * 10) }
       .mapChunks(_.flatMap(Chunk.byteBuffer))
       .through(HintFileDecoder.decode)
       .compile
