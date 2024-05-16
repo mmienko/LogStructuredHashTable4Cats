@@ -111,17 +111,17 @@ object DataFileDecoderTest extends SimpleIOSuite {
           key3 === expectedKv3.key,
           fileRef1 === KeyValueFileReference(
             UnusedTestDataFile,
-            positionInFile = 0,
+            offset = 0,
             recordSize
           ),
           fileRef2 === KeyValueFileReference(
             UnusedTestDataFile,
-            positionInFile = KeyValueCodec.HeaderSize + 10,
+            offset = KeyValueCodec.HeaderSize + 10,
             recordSize
           ),
           fileRef3 === KeyValueFileReference(
             UnusedTestDataFile,
-            positionInFile = (KeyValueCodec.HeaderSize + 10) * 2,
+            offset = (KeyValueCodec.HeaderSize + 10) * 2,
             recordSize
           )
         )

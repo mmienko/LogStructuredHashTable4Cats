@@ -38,11 +38,12 @@ that the key doesn't enter the _compacted files_. Thus is won't be reloaded in c
 
 The _HT_ is a list of tuples, _key_ and _EntryFileReference_. s/_EntryFileReference_/_FileReference_ OR s/_EntryFileReference_/_KeyValueEntryFileReference_
 
-Update to private final case class KeyValueFileReference2(file: Path, offset: Offset, length: Int)
-
 TODO: What to call `KeyValue | Tombstone`? FileRecord? Only used in implementation context.
 
 _HintFileReference_ ...
+
+TODO: In DB file, is it better to filter out no-op delete writes, then serialize to bytes and index update command.
+Split the stream in a way. Or inline logic into the pull function? Or rotate is simpler flatTap like?
 
 TODO: Def generate a new active data file on each startup. Compaction should gracefully handle empty files. Assuming
 that active data file has strictly higher number than older, clock drift can undermine that but we can document and/or

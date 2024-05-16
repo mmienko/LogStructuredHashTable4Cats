@@ -70,11 +70,20 @@ object WriteCommand {
 
 }
 
-private final case class KeyValueFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
+/**
+  * Serialized KeyValue record in a DataFile
+  * @param file
+  *   Datafile path
+  * @param offset
+  *   position in the file
+  * @param length
+  *   length of serialized KeyValue record (header data included)
+  */
+private final case class KeyValueFileReference(file: Path, offset: Offset, length: Int)
 
 object KeyValueFileReference {
   given Eq[KeyValueFileReference] = Eq.instance { (a, b) =>
-    a.filePath === b.filePath && a.positionInFile == b.positionInFile && a.entrySize === b.entrySize
+    a.file === b.file && a.offset == b.offset && a.length === b.length
   }
 }
 

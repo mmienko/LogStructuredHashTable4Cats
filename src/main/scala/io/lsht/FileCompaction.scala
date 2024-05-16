@@ -148,26 +148,26 @@ object FileCompaction {
             _ <- go(tail, valuesFileCursor, fileHotSwap, location)
           } yield ()
 
-        case Some(((_, KeyValueFileReference(filePath, positionInFile, entrySize)), tail)) =>
+        case Some(((_, KeyValueFileReference(file, offset, length)), tail)) =>
           for {
             location <- location match
-              case Some(s @ ReadCursorLocation(currentFile, _)) if filePath === currentFile =>
+              case Some(s @ ReadCursorLocation(currentFile, _)) if file === currentFile =>
                 Pull.pure(s)
 
               // Either we switch to new file or encountered the first Entry in stream
               case _ =>
                 Pull.eval {
                   fileHotSwap
-                    .swap(Files[F].readCursor(filePath, Flags.Read))
-                    .map(readCursor => ReadCursorLocation(currentFile = filePath, readCursor))
+                    .swap(Files[F].readCursor(file, Flags.Read))
+                    .map(readCursor => ReadCursorLocation(currentFile = file, readCursor))
                 }
 
-            readResult <- location.readCursor.seek(positionInFile).readPull(entrySize)
+            readResult <- location.readCursor.seek(offset).readPull(length)
 
             bytes <- Pull.eval {
               ApplicativeError[F, Throwable].fromOption(
                 readResult.map(_._2), // Ignore updated read cursor, since we seek in loop
-                Errors.CompactionException.SeekAndReadFailedOnDataFile(filePath, positionInFile)
+                Errors.CompactionException.SeekAndReadFailedOnDataFile(file, offset)
               )
             }
 

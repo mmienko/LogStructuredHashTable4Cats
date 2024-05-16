@@ -78,8 +78,8 @@ object Database {
                           kv.key,
                           KeyValueFileReference(
                             dataFile,
-                            positionInFile = offset,
-                            entrySize = KeyValueCodec.size(kv)
+                            offset = offset,
+                            length = KeyValueCodec.size(kv)
                           )
                         )
                       )
@@ -190,14 +190,14 @@ object Database {
           .map(bytes =>
             BytesToFile(
               bytes,
-              onWrite = (fileOffset, writerFile) =>
+              onWrite = (offset, dataFile) =>
                 index.update(
                   _.updated(
                     kv.key,
                     KeyValueFileReference(
-                      filePath = writerFile,
-                      positionInFile = fileOffset,
-                      entrySize = bytes.capacity()
+                      file = dataFile,
+                      offset = offset,
+                      length = bytes.capacity()
                     )
                   )
                 ) *> signal.complete(()).void

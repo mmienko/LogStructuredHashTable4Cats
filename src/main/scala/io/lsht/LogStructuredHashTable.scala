@@ -17,20 +17,20 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
 
   def get(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
-      case Some(KeyValueFileReference(filePath, positionInFile, entrySize)) =>
+      case Some(KeyValueFileReference(file, offset, length)) =>
         // TODO: Use an object pool for efficient resource/file management
         Files[F]
-          .open(filePath, Flags.Read)
+          .open(file, Flags.Read)
           .adaptErr { case err: java.nio.file.FileSystemException =>
             Errors.Read.FileSystem(err)
           }
           .use { fh =>
             for {
-              bytes <- fh.read(numBytes = entrySize, offset = positionInFile)
+              bytes <- fh.read(numBytes = length, offset = offset)
               bytes <- ApplicativeError[F, Throwable]
                 .fromOption(bytes, Errors.Read.CorruptedDataFile)
               _ <- ApplicativeError[F, Throwable]
-                .raiseWhen(bytes.size != entrySize)(
+                .raiseWhen(bytes.size != length)(
                   Errors.Read.CorruptedDataFile
                 )
               putValue <- KeyValueCodec.decode(bytes)
