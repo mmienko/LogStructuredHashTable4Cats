@@ -18,7 +18,7 @@ object FileCompaction {
   type EntryByFile = (Path, Offset, KeyValueEntry | Tombstone)
 
   // TODO: immutable.VectorMap vs mutable.LinkedListHashMap
-  private val EmptyIndex = VectorMap.empty[Key, HintFileReference | EntryFileReference]
+  private val EmptyIndex = VectorMap.empty[Key, HintFileReference | KeyValueFileReference]
   // TODO: hint vs compacted??
   // TODO: there should be a critical section as only 1 compaction process should be running
 
@@ -63,7 +63,7 @@ object FileCompaction {
                 case Left(err) =>
                   Console[F]
                     .println(s"File ${dataFile.toString} ${err.toString}")
-                    .as(none[(Key, EntryFileReference) | Tombstone])
+                    .as(none[(Key, KeyValueFileReference) | Tombstone])
 
                 case Right(keyFileRefOrTombstone) =>
                   keyFileRefOrTombstone.some.pure[F]
@@ -71,7 +71,7 @@ object FileCompaction {
           }
           .compile
           .fold(compactedIndex.getOrElse(EmptyIndex)) {
-            case (index, (key, entry: EntryFileReference)) =>
+            case (index, (key, entry: KeyValueFileReference)) =>
               index.updated(key, entry)
 
             case (index, key: Tombstone) =>
@@ -115,11 +115,11 @@ object FileCompaction {
 
   private def readKeyValueEntryFromDataFile[F[_]: Async](valuesFile: Option[Path]): Pipe[
     F,
-    (Key, HintFileReference | EntryFileReference),
+    (Key, HintFileReference | KeyValueFileReference),
     KeyValueEntry
   ] = {
     def go(
-        s: Stream[F, (Key, HintFileReference | EntryFileReference)],
+        s: Stream[F, (Key, HintFileReference | KeyValueFileReference)],
         valuesFileCursor: Option[ReadCursor[F]],
         fileHotSwap: Hotswap[F, ReadCursor[F]],
         location: Option[ReadCursorLocation[F]]
@@ -148,7 +148,7 @@ object FileCompaction {
             _ <- go(tail, valuesFileCursor, fileHotSwap, location)
           } yield ()
 
-        case Some(((_, EntryFileReference(filePath, positionInFile, entrySize)), tail)) =>
+        case Some(((_, KeyValueFileReference(filePath, positionInFile, entrySize)), tail)) =>
           for {
             location <- location match
               case Some(s @ ReadCursorLocation(currentFile, _)) if filePath === currentFile =>

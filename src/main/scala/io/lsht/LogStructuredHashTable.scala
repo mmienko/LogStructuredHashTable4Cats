@@ -11,13 +11,13 @@ import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
 
 class LogStructuredHashTable[F[_]: Async] private[lsht] (
     queue: QueueSink[F, WriteCommand[F]],
-    index: Ref[F, Map[Key, EntryFileReference]],
+    index: Ref[F, Map[Key, KeyValueFileReference]],
     isClosed: Ref[F, Boolean]
 ) {
 
   def get(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
-      case Some(EntryFileReference(filePath, positionInFile, entrySize)) =>
+      case Some(KeyValueFileReference(filePath, positionInFile, entrySize)) =>
         // TODO: Use an object pool for efficient resource/file management
         Files[F]
           .open(filePath, Flags.Read)

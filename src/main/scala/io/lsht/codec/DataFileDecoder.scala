@@ -12,7 +12,7 @@ object DataFileDecoder {
   type Tombstone = Key
   // TODO: Adt's instead of |
   type ParsedKeyValueEntry = ParsedHeaderState[KeyValueEntry]
-  type ParsedEntryFileReference = Either[Throwable, (Key, EntryFileReference) | Tombstone]
+  type ParsedEntryFileReference = Either[Throwable, (Key, KeyValueFileReference) | Tombstone]
   private type ParsedHeaderState[A] = (Either[Throwable, A | Tombstone], Offset)
   private type KeySize = Int
   private type ValueSize = Int
@@ -30,7 +30,7 @@ object DataFileDecoder {
   def decodeAsFileReference[F[_]: Sync](dataFile: Path): Pipe[F, Byte, ParsedEntryFileReference] = {
     val p = decodeKeyValueState { kvHeader =>
       val keyHeader = kvHeader.keyHeader
-      KeyValuePull[F, (Key, EntryFileReference)](
+      KeyValuePull[F, (Key, KeyValueFileReference)](
         keyHeader.keySize,
         keyBytes =>
           Pull
@@ -160,7 +160,7 @@ object DataFileDecoder {
       offset: Offset,
       entrySize: Int,
       bytes: Chunk[Byte]
-  ): F[(Key, EntryFileReference)] = Sync[F].defer {
+  ): F[(Key, KeyValueFileReference)] = Sync[F].defer {
     val bb = bytes.toByteBuffer
     val checksum = bb.getInt
     val _ = bb.get // skip tombstone
@@ -172,7 +172,7 @@ object DataFileDecoder {
       val key = Array.fill(keySize)(0.toByte)
       bb.get(key)
 
-      (Key(key), EntryFileReference(filePath, offset, KeyValueEntryCodec.HeaderSize + entrySize))
+      (Key(key), KeyValueFileReference(filePath, offset, KeyValueEntryCodec.HeaderSize + entrySize))
     }
   }
 

@@ -21,3 +21,31 @@
 10) Does it make sense to use different Checksums depending on the length of data? Is there different performance? This could be inlined as a note.
 11) Use scala property based testing for PutCodec and other parts of codebase?
 12) Implement a CLI app to interface with DB
+13) How could a secondary index be implemented?
+
+There is a _DB_ which creates a _LSHT_ which then creates a _hash table_ (_HT_), loads data from disk into it, starts a single
+threaded process to append writes to an _active data file_ (which is mutable append only log) with _file rotation_, and starts a _compaction process_
+over the older _inactive data files_ (which are immutable) and _compacted files_. The latter is a pair of _hint_ and _values_ files.
+
+Loading from disk reads the _hint_ file, _inactive data files_, and _active data file_.
+
+s/_hint_/_keys_ or s/_hint_/_keys_with_value_references_? 
+
+A _key_ _value_ pair is called an _entry_. Mhh, entry sounds overused.
+
+Deletions create _tombstones_, special entries in _data files_ that mark a key for pruning during _compaction_, so
+that the key doesn't enter the _compacted files_. Thus is won't be reloaded in case _DB_ stops and crashes.
+
+The _HT_ is a list of tuples, _key_ and _EntryFileReference_. s/_EntryFileReference_/_FileReference_ OR s/_EntryFileReference_/_KeyValueEntryFileReference_
+
+_KeyValueEntry_ ...
+
+_HintFileReference_ ...
+
+TODO: Def generate a new active data file on each startup. Compaction should gracefully handle empty files. Assuming
+that active data file has strictly higher number than older, clock drift can undermine that but we can document and/or
+throw error. New file code could also enforce that new file ts is one greater than last, which it should have context about.  
+
+Under the hood, the code uses _codecs_ to _encode_ and _decode_ _KeyValueEntries_ to bytes.
+
+Each concept should have representation in code. Stop abusing `|` type. 

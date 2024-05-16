@@ -5,7 +5,7 @@ import fs2.Chunk
 import fs2.io.file.Path
 import io.lsht.codec.CodecCommons.ChecksumSize
 import io.lsht.codec.{DataFileDecoder, KeyValueEntryCodec, TombstoneEncoder}
-import io.lsht.{EntryFileReference, Key, KeyValueEntry}
+import io.lsht.{KeyValueFileReference, Key, KeyValueEntry}
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -109,17 +109,17 @@ object DataFileDecoderTest extends SimpleIOSuite {
           key1 === expectedKv1.key,
           key2 === expectedKv2.key,
           key3 === expectedKv3.key,
-          fileRef1 === EntryFileReference(
+          fileRef1 === KeyValueFileReference(
             UnusedTestDataFile,
             positionInFile = 0,
             entrySize
           ),
-          fileRef2 === EntryFileReference(
+          fileRef2 === KeyValueFileReference(
             UnusedTestDataFile,
             positionInFile = KeyValueEntryCodec.HeaderSize + 10,
             entrySize
           ),
-          fileRef3 === EntryFileReference(
+          fileRef3 === KeyValueFileReference(
             UnusedTestDataFile,
             positionInFile = (KeyValueEntryCodec.HeaderSize + 10) * 2,
             entrySize

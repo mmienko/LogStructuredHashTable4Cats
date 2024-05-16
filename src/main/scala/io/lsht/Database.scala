@@ -60,7 +60,7 @@ object Database {
                 dataFiles.forall(_.fileName.toString.startsWith("data."))
               )(new UnsupportedOperationException("Assuming only rotated data files"))
 
-              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
+              index <- Ref[F].of(Map.empty[Key, KeyValueFileReference])
 
               // TODO: fold with map, rather then ref
               counts <- dataFiles.traverse { dataFile =>
@@ -76,7 +76,7 @@ object Database {
                       index.update(
                         _.updated(
                           entry.key,
-                          EntryFileReference(
+                          KeyValueFileReference(
                             dataFile,
                             positionInFile = offset,
                             entrySize = KeyValueEntryCodec.size(entry)
@@ -95,7 +95,7 @@ object Database {
               count = counts.last
             } yield runDatabase(
               directory,
-              initialFile = dataFiles.last,
+              initialActiveDataFile = dataFiles.last,
               initialEntries = count.getOrElse(0),
               index,
               entriesLimit
@@ -106,21 +106,21 @@ object Database {
           // new DB
           Resource.suspend {
             for {
-              writerFile <- newFileName(directory)
+              activeDataFile <- newDataFileName(directory)
 
               // TODO: what happens if file already exists? B/c two programs are running?
-              _ <- Files[F].createFile(writerFile)
+              _ <- Files[F].createFile(activeDataFile)
 
-              index <- Ref[F].of(Map.empty[Key, EntryFileReference])
-            } yield runDatabase(directory, writerFile, initialEntries = 0, index, entriesLimit)
+              index <- Ref[F].of(Map.empty[Key, KeyValueFileReference])
+            } yield runDatabase(directory, activeDataFile, initialEntries = 0, index, entriesLimit)
           }
     }
 
   private def runDatabase[F[_]: Async: Console: Clock](
-      directory: Path,
-      initialFile: Path,
+      dbDirectory: Path,
+      initialActiveDataFile: Path,
       initialEntries: Int,
-      index: Ref[F, Map[Key, EntryFileReference]],
+      index: Ref[F, Map[Key, KeyValueFileReference]],
       entriesLimit: Int
   ) =
     for {
@@ -133,7 +133,7 @@ object Database {
           .fromQueueUnterminated(queue, limit = 1) // TODO: what should limit be? Higher is better for performancea
           .evalMap(interpretCommand(index))
           .flattenOption
-          .through(executeWriteAndRotateFile(initialFile, initialEntries, newFileName(directory), entriesLimit))
+          .through(executeWriteAndRotateFile(dbDirectory, initialActiveDataFile, initialEntries, entriesLimit))
           .compile
           .drain
       ) {
@@ -177,10 +177,10 @@ object Database {
       .compile
       .toVector
 
-  private def newFileName[F[_]: Clock: Applicative](directory: Path) =
+  private def newDataFileName[F[_]: Clock: Applicative](directory: Path) =
     Clock[F].realTime.map(now => directory / s"data.${now.toMillis.toString}.db")
 
-  private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, EntryFileReference]])(
+  private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, KeyValueFileReference]])(
       cmd: WriteCommand[F]
   ): F[Option[BytesToFile[F]]] =
     cmd match // tODO: guaranteeCommandCompletes
@@ -194,7 +194,7 @@ object Database {
                 index.update(
                   _.updated(
                     keyValueEntry.key,
-                    EntryFileReference(
+                    KeyValueFileReference(
                       filePath = writerFile,
                       positionInFile = fileOffset,
                       entrySize = bytes.capacity()
@@ -253,16 +253,16 @@ object Database {
   //  the number of rewrites to keys, the more rewrites, the more the file can be compacted, thus saving
   //  space.
   private[lsht] def executeWriteAndRotateFile[F[_]: Async](
+      dbDirectory: Path,
       initialFile: Path,
       initialEntries: Int,
-      computePath: F[Path],
       entriesLimit: Int
   ): Pipe[F, BytesToFile[F], Unit] = {
     def toCursor(file: FileHandle[F]): F[WriteCursor[F]] =
       Files[F].writeCursorFromFileHandle(file, append = true)
 
     def swapFile(fileHotswap: Hotswap[F, FileHandle[F]]) =
-      computePath.flatMap { path =>
+      newDataFileName(dbDirectory).flatMap { path =>
         fileHotswap
           .swap(Files[F].open(path, Flags.Append))
           .flatMap(toCursor)

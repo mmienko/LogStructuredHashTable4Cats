@@ -68,16 +68,17 @@ object WriteCommand {
 
 }
 
-private final case class EntryFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
+private final case class KeyValueFileReference(filePath: Path, positionInFile: Long, entrySize: Int)
 
-object EntryFileReference {
-  given Eq[EntryFileReference] = Eq.instance { (a, b) =>
+object KeyValueFileReference {
+  given Eq[KeyValueFileReference] = Eq.instance { (a, b) =>
     a.filePath === b.filePath && a.positionInFile == b.positionInFile && a.entrySize === b.entrySize
   }
 }
 
 // TODO: use in DB
 private given Ordering[Path] = (x: Path, y: Path) => x.fileName.toString.compare(y.fileName.toString)
+// TODO: Eq[Value]? under Value type
 private given Eq[Array[Byte]] = Eq.instance(_ sameElements _)
 
 private final case class EntryHint(key: Key, positionInFile: Long, valueSize: Int)
