@@ -14,24 +14,23 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database can be opened and closed") {
     Files[IO].tempDirectory.use { dir =>
-      Files[IO].list(dir).compile.toList.flatMap(files => expect(files.isEmpty).failFast) *>
-        LogStructuredHashTable[IO](dir).use_ *>
-        Files[IO].list(dir).compile.toList.map { files =>
-          expect(files.size === 1) and expect(files.head.fileName.toString.matches(DataFileNamePattern))
-        }
+      for {
+        files <- Files[IO].list(dir).compile.toList
+        _ <- expect(files.isEmpty).failFast
+        _ <- Database[IO](dir).use_
+        files <- Files[IO].list(dir).compile.toList
+      } yield expect(files.isEmpty)
     }
   }
 
   test("Database can be re-opened") {
     Files[IO].tempDirectory
       .use { dir =>
-        LogStructuredHashTable[IO](dir).use_ *>
-          LogStructuredHashTable[IO](dir).use_ *>
-          Files[IO].list(dir).compile.toList
-      }
-      .map { files =>
-        expect(files.size === 1) and
-          expect(files.head.fileName.toString.matches(DataFileNamePattern))
+        for {
+          _ <- Database[IO](dir).use_
+          _ <- Database[IO](dir).use_
+          files <- Files[IO].list(dir).compile.toList
+        } yield expect(files.isEmpty)
       }
   }
 

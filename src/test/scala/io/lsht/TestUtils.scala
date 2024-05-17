@@ -15,5 +15,5 @@ object TestUtils {
     (new Expect)(new String(actual) === expected)
 
   def tempDatabase: Resource[IO, LogStructuredHashTable[IO]] =
-    Files[IO].tempDirectory.flatMap(LogStructuredHashTable[IO](_))
+    Files[IO].tempDirectory.flatMap(Database[IO](_))
 }
