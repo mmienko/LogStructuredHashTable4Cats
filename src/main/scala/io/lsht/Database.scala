@@ -214,6 +214,8 @@ object Database {
       dbDirectory: Path,
       recordsLimit: Int
   ): Pipe[F, BytesToFile[F], Unit] = {
+    // TODO: What happens if the timestamp of new file is smaller than a previous one. Could be due to clock drift.
+    //  Enforce that here or document how it could be enforced as it is an unlikely edge case.
     val nextDataFileName =
       Clock[F].realTime.map(now => dbDirectory / s"data.${now.toMillis.toString}.db")
 

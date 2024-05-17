@@ -27,7 +27,3 @@ TODO: What to call `KeyValue | Tombstone`? FileRecord? Only used in implementati
 
 TODO: In DB file, is it better to filter out no-op delete writes, then serialize to bytes and index update command.
 Split the stream in a way. Or inline logic into the pull function? Or rotate is simpler flatTap like?
-
-TODO: Def generate a new active data file on each startup. Compaction should gracefully handle empty files. Assuming
-that active data file has strictly higher number than older, clock drift can undermine that but we can document and/or
-throw error. New file code could also enforce that new file ts is one greater than last, which it should have context about.  
