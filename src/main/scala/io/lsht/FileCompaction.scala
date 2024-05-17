@@ -6,7 +6,7 @@ import cats.effect.{Async, Clock}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError}
 import io.lsht.codec.DataFileDecoder.Tombstone
-import io.lsht.codec.{CompactedKeyFileDecoder, DataFileDecoder, KeyValueCodec, ValuesCodec}
+import io.lsht.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, ValuesCodec}
 import fs2.*
 import fs2.io.file.*
 
@@ -31,7 +31,7 @@ object FileCompaction {
         compactedFilesWithIndex <- allCompactedFiles.lastOption.traverse { compactedFiles =>
           Files[F]
             .readAll(compactedFiles.keys)
-            .through(CompactedKeyFileDecoder.decode)
+            .through(CompactedKeysFileDecoder.decode)
             .evalMapFilter {
               case Left(error) =>
                 Console[F].println(s"Could not read compacted key. $error").as(none[(Key, CompactedValue)])

@@ -4,6 +4,7 @@ import cats.Eq
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
 import fs2.io.file.Path
+import Value.equality
 
 import java.util
 
@@ -25,6 +26,10 @@ object Key {
 
 type Value = Array[Byte]
 
+object Value {
+  given equality: Eq[Array[Byte]] = Eq.instance(_ sameElements _)
+}
+
 private final case class KeyValue(key: Key, value: Value) {
   def size: Int = key.length + value.length
 }
@@ -32,8 +37,6 @@ private final case class KeyValue(key: Key, value: Value) {
 object KeyValue {
   given Eq[KeyValue] = Eq.and(Eq.by(_.key), Eq.by(_.value))
 }
-
-private type Offset = Long
 
 private type WriteResult = Unit | Throwable
 
@@ -70,6 +73,8 @@ object WriteCommand {
 
 }
 
+private type Offset = Long
+
 /**
   * Serialized KeyValue record in a DataFile
   * @param file
@@ -87,10 +92,7 @@ object KeyValueFileReference {
   }
 }
 
-// TODO: use in DB
 private given Ordering[Path] = (x: Path, y: Path) => x.fileName.toString.compare(y.fileName.toString)
-// TODO: Eq[Value]? under Value type
-private given Eq[Array[Byte]] = Eq.instance(_ sameElements _)
 
 private final case class CompactedValue(offset: Offset, length: Int)
 private final case class CompactedKey(key: Key, compactedValue: CompactedValue)

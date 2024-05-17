@@ -5,7 +5,7 @@ import fs2.{Pipe, Pull}
 import io.lsht.{CompactedKey, CompactedValue, Key}
 import cats.syntax.all.*
 
-object CompactedKeyFileDecoder {
+object CompactedKeysFileDecoder {
 
   type ParsedCompactedKey = Either[Throwable, CompactedKey]
 

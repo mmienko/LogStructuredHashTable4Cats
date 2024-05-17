@@ -10,7 +10,6 @@ import fs2.{Chunk, Pipe, Pull, Stream}
 import io.lsht.LogStructuredHashTable.*
 import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
 
-// TODO: just use database instead of HashTable object
 object Database {
 
   // TODO: s/Console/Logger
@@ -20,7 +19,7 @@ object Database {
         _ <- verifyPathIsDirectory[F](directory)
 
         files <- getFiles(directory)
-      } yield NonEmptyList.fromFoldable(files.sortBy(_.fileName.toString)) match
+      } yield NonEmptyList.fromFoldable(files.sorted) match
         case Some(dataFiles) =>
           /*
         Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use

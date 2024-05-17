@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.syntax.all.*
 import fs2.{Chunk, Pipe, Pull, Stream}
 import fs2.io.file.{Files, Flags, Path, ReadCursor, WriteCursor}
-import io.lsht.codec.{CompactedKeyCodec, CompactedKeyFileDecoder, ValuesCodec}
+import io.lsht.codec.{CompactedKeyCodec, CompactedKeysFileDecoder, ValuesCodec}
 import io.lsht.{KeyValue, given_Ordering_Path}
 
 import scala.concurrent.duration.FiniteDuration
@@ -27,7 +27,7 @@ object CompactionFilesUtil {
   def readKeyValueEntries[F[_]: Async](compactedFiles: CompactedFiles): Stream[F, Either[Throwable, KeyValue]] =
     Files[F]
       .readAll(compactedFiles.keys)
-      .through(CompactedKeyFileDecoder.decode)
+      .through(CompactedKeysFileDecoder.decode)
       .through(readValuesAndCombine(compactedFiles.values))
 
   def attemptListCompactionFiles[F[_]: Async](dir: Path): F[List[Either[String, CompactedFiles]]] =

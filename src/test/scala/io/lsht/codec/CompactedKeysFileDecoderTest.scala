@@ -6,14 +6,14 @@ import io.lsht
 import io.lsht.{CompactedKey, CompactedValue, Key, KeyValue}
 import weaver.*
 
-object CompactedKeyFileDecoderTest extends SimpleIOSuite {
+object CompactedKeysFileDecoderTest extends SimpleIOSuite {
 
   test("decode stream of bytes for a single KeyValue") {
     val key = Key("key")
     fs2.Stream
       .eval(CompactedKeyCodec.encode[IO](KeyValue(key, "value".getBytes), valuePosition = 0))
       .mapChunks(_.flatMap(Chunk.byteBuffer))
-      .through(CompactedKeyFileDecoder.decode)
+      .through(CompactedKeysFileDecoder.decode)
       .compile
       .lastOrError
       .map(whenSuccess(_) { compactedKey =>
@@ -28,7 +28,7 @@ object CompactedKeyFileDecoderTest extends SimpleIOSuite {
       .covary[IO]
       .evalMap { case (kv, i) => CompactedKeyCodec.encode[IO](kv, valuePosition = i * 10) }
       .mapChunks(_.flatMap(Chunk.byteBuffer))
-      .through(CompactedKeyFileDecoder.decode)
+      .through(CompactedKeysFileDecoder.decode)
       .compile
       .toList
       .map(_.zipWithIndex)
