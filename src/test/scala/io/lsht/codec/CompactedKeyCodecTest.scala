@@ -3,15 +3,15 @@ package io.lsht.codec
 import cats.effect.IO
 import fs2.Chunk
 import io.lsht.codec.CodecCommons.*
-import io.lsht.codec.KeyValueCodecTest$.expect
-import io.lsht.{EntryHint, Key, KeyValue}
+import io.lsht.codec.KeyValueCodecTest.expect
+import io.lsht.{CompactedKey, CompactedValue, Key, KeyValue}
 import weaver.*
 
-object HintCodecTest extends SimpleIOSuite {
+object CompactedKeyCodecTest extends SimpleIOSuite {
 
   test("Encodes KeyValue with offset and non-empty key and non-empty value") {
     for {
-      bb <- HintCodec.encode(KeyValue(Key("key"), "value".getBytes), valuePosition = 1971L)
+      bb <- CompactedKeyCodec.encode(KeyValue(Key("key"), "value".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -32,7 +32,7 @@ object HintCodecTest extends SimpleIOSuite {
 
   test("Encodes KeyValue with offset and non-empty key and empty value") {
     for {
-      bb <- HintCodec.encode(KeyValue(Key("key"), "".getBytes), valuePosition = 1971L)
+      bb <- CompactedKeyCodec.encode(KeyValue(Key("key"), "".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -53,7 +53,7 @@ object HintCodecTest extends SimpleIOSuite {
 
   test("Encodes KeyValue with offset and empty key and non-empty value") {
     for {
-      bb <- HintCodec.encode(KeyValue(Key(""), "value".getBytes), valuePosition = 1971L)
+      bb <- CompactedKeyCodec.encode(KeyValue(Key(""), "value".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -74,7 +74,7 @@ object HintCodecTest extends SimpleIOSuite {
 
   test("Encodes KeyValue with offset and empty key and empty value") {
     for {
-      bb <- HintCodec.encode(KeyValue(Key(""), "".getBytes), valuePosition = 1971L)
+      bb <- CompactedKeyCodec.encode(KeyValue(Key(""), "".getBytes), valuePosition = 1971L)
 
       crc <- IO(bb.getInt)
       checkSum <- getChecksum(bb.slice())
@@ -96,14 +96,14 @@ object HintCodecTest extends SimpleIOSuite {
   // TODO: lots of common patterns, unify. Also test crc detection
 
   test("decode bytes to EntryHint") {
-    HintCodec
+    CompactedKeyCodec
       .encode(KeyValue(Key("key"), "value".getBytes), valuePosition = 1971L)
       .map(Chunk.byteBuffer)
-      .flatMap(HintCodec.decode[IO])
-      .map { case EntryHint(key, positionInFile, valueSize) =>
+      .flatMap(CompactedKeyCodec.decode[IO])
+      .map { case CompactedKey(key, CompactedValue(offset, length)) =>
         expect.eql(new String(key.value), "key") and
-          expect.eql(positionInFile, 1971L) and
-          expect.eql(valueSize, 5)
+          expect.eql(offset, 1971L) and
+          expect.eql(length, 5)
       }
   }
 }

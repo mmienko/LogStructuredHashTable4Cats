@@ -92,10 +92,11 @@ private given Ordering[Path] = (x: Path, y: Path) => x.fileName.toString.compare
 // TODO: Eq[Value]? under Value type
 private given Eq[Array[Byte]] = Eq.instance(_ sameElements _)
 
-private final case class EntryHint(key: Key, positionInFile: Long, valueSize: Int)
+private final case class CompactedValue(offset: Offset, length: Int)
+private final case class CompactedKey(key: Key, compactedValue: CompactedValue)
 
-private object EntryHint {
-  given Eq[EntryHint] = Eq.fromUniversalEquals
+private object CompactedKey {
+  given Eq[CompactedKey] = Eq.fromUniversalEquals
 }
 
-private final case class CompactedFiles(hint: Path, values: Path, timestamp: Long)
+private final case class CompactedFiles(keys: Path, values: Path, timestamp: Long)

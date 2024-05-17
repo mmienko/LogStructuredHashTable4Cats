@@ -9,7 +9,7 @@ import weaver.*
 
 import java.nio.ByteBuffer
 
-object KeyValueCodecTest$ extends SimpleIOSuite {
+object KeyValueCodecTest extends SimpleIOSuite {
 
   private val NonCrcHeaderSize: Int = 9
 

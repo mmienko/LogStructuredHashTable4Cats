@@ -4,11 +4,11 @@ import cats.ApplicativeError
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.{EntryHint, Errors, KeyValue, Offset, Key}
+import io.lsht.{CompactedKey, CompactedValue, Errors, Key, KeyValue, Offset}
 
 import java.nio.ByteBuffer
 
-object HintCodec {
+object CompactedKeyCodec {
 
   val HeaderSize: Int = 4 + // 4-byte CRC
     4 + // 4-byte Key Size
@@ -31,13 +31,13 @@ object HintCodec {
       .flatTap(CodecUtils.addCrc(_, totalSize))
   }
 
-  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[EntryHint] = {
+  def decode[F[_]: Sync](bytes: Chunk[Byte]): F[CompactedKey] = {
     val bb = bytes.toByteBuffer
     val checksum = bb.getInt
 
     CodecUtils
       .isValidCrc(bb, bbSize = bytes.size, checksum)
-      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(new HintCodecError(Errors.Read.BadChecksum)))
+      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(new CodecError(Errors.Read.BadChecksum)))
       .flatMap { _ =>
         Sync[F].delay {
           val keySize = bb.getInt
@@ -46,10 +46,10 @@ object HintCodec {
           val key = Array.fill(keySize)(0.toByte)
           bb.get(key)
 
-          EntryHint(Key(key), positionInFile = valuePosition, valueSize)
+          CompactedKey(Key(key), CompactedValue(valuePosition, valueSize))
         }
       }
   }
 
-  class HintCodecError(cause: Throwable) extends Throwable(cause)
+  class CodecError(cause: Throwable) extends Throwable(cause)
 }

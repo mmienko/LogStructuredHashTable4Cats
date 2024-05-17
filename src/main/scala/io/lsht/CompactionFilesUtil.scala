@@ -5,29 +5,29 @@ import cats.effect.Async
 import cats.syntax.all.*
 import fs2.{Chunk, Pipe, Pull, Stream}
 import fs2.io.file.{Files, Flags, Path, ReadCursor, WriteCursor}
-import io.lsht.codec.{HintCodec, HintFileDecoder, ValuesCodec}
+import io.lsht.codec.{CompactedKeyCodec, CompactedKeyFileDecoder, ValuesCodec}
 import io.lsht.{KeyValue, given_Ordering_Path}
 
 import scala.concurrent.duration.FiniteDuration
 
 object CompactionFilesUtil {
 
-  def writeKeyValueEntries[F[_]: Async](
+  def writeKeyValueToCompactionFiles[F[_]: Async](
       databaseDirectory: Path,
       timestamp: FiniteDuration
   ): Pipe[F, KeyValue, Unit] = {
     val fileTimestamp = timestamp.toMillis.toString
     in =>
-      in.through(writeValuesAndGiveHints(databaseDirectory / s"values.$fileTimestamp.db"))
-        .evalMap(HintCodec.encode)
+      in.through(writeCompactedValues(databaseDirectory / s"values.$fileTimestamp.db"))
+        .evalMap(CompactedKeyCodec.encode)
         .mapChunks(_.flatMap(Chunk.byteBuffer))
-        .through(Files[F].writeAll(databaseDirectory / s"hint.$fileTimestamp.db", Flags.Append))
+        .through(Files[F].writeAll(databaseDirectory / s"keys.$fileTimestamp.db", Flags.Append))
   }
 
   def readKeyValueEntries[F[_]: Async](compactedFiles: CompactedFiles): Stream[F, Either[Throwable, KeyValue]] =
     Files[F]
-      .readAll(compactedFiles.hint)
-      .through(HintFileDecoder.decode)
+      .readAll(compactedFiles.keys)
+      .through(CompactedKeyFileDecoder.decode)
       .through(readValuesAndCombine(compactedFiles.values))
 
   def attemptListCompactionFiles[F[_]: Async](dir: Path): F[List[Either[String, CompactedFiles]]] =
@@ -39,15 +39,15 @@ object CompactionFilesUtil {
         files
           .filter { path =>
             val fn = path.fileName.toString
-            fn.startsWith("hint") || fn.startsWith("values")
+            fn.startsWith("keys") || fn.startsWith("values")
           }
           .sorted
           .toList
-          .partition(_.fileName.toString.startsWith("hint"))
-          .mapN { case (hintFile, valuesFile) =>
-            val hintFileName = hintFile.fileName.toString
-            val hintTs = hintFileName.split("\\.").toList match
-              case "hint" :: timestamp :: "db" :: Nil =>
+          .partition(_.fileName.toString.startsWith("keys"))
+          .mapN { case (keysFile, valuesFile) =>
+            val keysFileName = keysFile.fileName.toString
+            val keysTs = keysFileName.split("\\.").toList match
+              case "keys" :: timestamp :: "db" :: Nil =>
                 timestamp.toLongOption
               case _ =>
                 none[Long]
@@ -59,23 +59,23 @@ object CompactionFilesUtil {
                 none[Long]
 
             (
-              Validated.fromOption(hintTs, s"Hint File name, $hintFileName, could not be parsed").toValidatedNec,
+              Validated.fromOption(keysTs, s"Key File name, $keysFileName, could not be parsed").toValidatedNec,
               Validated.fromOption(valuesTs, s"Value File name, $valuesFileName, could not be parsed").toValidatedNec,
               Validated
                 .cond(
-                  hintTs == valuesTs,
+                  keysTs == valuesTs,
                   (),
-                  s"Hint, $hintFileName, and Values, $valuesFileName, timestamps are not equal"
+                  s"Keys, $keysFileName, and Values, $valuesFileName, timestamps are not equal"
                 )
                 .toValidatedNec
             ).mapN { case (ts, _, _) =>
-              CompactedFiles(hintFile, valuesFile, ts)
+              CompactedFiles(keysFile, valuesFile, ts)
             }.leftMap(_.mkString_("\n"))
               .toEither
           }
       }
 
-  private def writeValuesAndGiveHints[F[_]: Async](path: Path): Pipe[F, KeyValue, (KeyValue, Offset)] = {
+  private def writeCompactedValues[F[_]: Async](path: Path): Pipe[F, KeyValue, (KeyValue, Offset)] = {
     def go(s: Stream[F, KeyValue], cursor: WriteCursor[F]): Pull[F, (KeyValue, Offset), Unit] =
       s.pull.uncons1.flatMap {
         case Some((entry, tail)) =>
@@ -96,20 +96,20 @@ object CompactionFilesUtil {
   }
 
   private def readValuesAndCombine[F[_]: Async](
-      hintFile: Path
-  ): Pipe[F, Either[Throwable, EntryHint], Either[Throwable, KeyValue]] = {
+      compactedKeysFile: Path
+  ): Pipe[F, Either[Throwable, CompactedKey], Either[Throwable, KeyValue]] = {
     def go(
-        s: Stream[F, Either[Throwable, EntryHint]],
+        s: Stream[F, Either[Throwable, CompactedKey]],
         cursor: ReadCursor[F]
     ): Pull[F, Either[Throwable, KeyValue], Unit] =
       s.pull.uncons1.flatMap {
         case Some((Left(error), tail)) =>
           Pull.output1(error.asLeft[KeyValue]) >> go(tail, cursor)
 
-        case Some((Right(hint), tail)) =>
+        case Some((Right(CompactedKey(key, CompactedValue(offset, length))), tail)) =>
           cursor
-            .seek(hint.positionInFile)
-            .readPull(ValuesCodec.HeaderSize + hint.valueSize)
+            .seek(offset)
+            .readPull(ValuesCodec.HeaderSize + length)
             .map(_.map(_._2))
             // TODO: better errors
             .evalMap {
@@ -117,7 +117,7 @@ object CompactionFilesUtil {
                 ValuesCodec
                   .decode(bytes)
                   .attempt
-                  .map(_.map(value => KeyValue(hint.key, value)))
+                  .map(_.map(value => KeyValue(key, value)))
 
               case None =>
                 new Throwable("Value is missing").asLeft[KeyValue].pure[F]
@@ -130,7 +130,7 @@ object CompactionFilesUtil {
 
     in =>
       Stream
-        .resource(Files[F].readCursor(hintFile, Flags.Read))
+        .resource(Files[F].readCursor(compactedKeysFile, Flags.Read))
         .flatMap(go(in, _).stream)
   }
 

@@ -2,20 +2,20 @@ package io.lsht.codec
 
 import cats.effect.Sync
 import fs2.{Pipe, Pull}
-import io.lsht.{EntryHint, Key}
-import cats.syntax.all._
+import io.lsht.{CompactedKey, CompactedValue, Key}
+import cats.syntax.all.*
 
-object HintFileDecoder {
+object CompactedKeyFileDecoder {
 
-  type ParsedEntryHint = Either[Throwable, EntryHint]
+  type ParsedCompactedKey = Either[Throwable, CompactedKey]
 
   private final case class HeaderState(crc: Int, keySize: Int, valueSize: Int, valueOffset: Long)
 
-  def decode[F[_]: Sync]: Pipe[F, Byte, ParsedEntryHint] = {
-    def go(s: fs2.Stream[F, Byte], headerState: Option[HeaderState]): Pull[F, ParsedEntryHint, Unit] = {
+  def decode[F[_]: Sync]: Pipe[F, Byte, ParsedCompactedKey] = {
+    def go(s: fs2.Stream[F, Byte], headerState: Option[HeaderState]): Pull[F, ParsedCompactedKey, Unit] = {
       headerState match
         case None =>
-          s.pull.unconsN(HintCodec.HeaderSize).flatMap {
+          s.pull.unconsN(CompactedKeyCodec.HeaderSize).flatMap {
             case Some((bytes, tail)) =>
               val bb = bytes.toByteBuffer
               go(
@@ -36,7 +36,8 @@ object HintFileDecoder {
           s.pull.unconsN(header.keySize).flatMap {
             case Some((bytes, tail)) =>
               Pull.output1(
-                EntryHint(Key(bytes.toArray), positionInFile = header.valueOffset, header.valueSize).asRight[Throwable]
+                CompactedKey(Key(bytes.toArray), CompactedValue(offset = header.valueOffset, length = header.valueSize))
+                  .asRight[Throwable]
               ) >> go(tail, headerState = None)
 
             case None =>

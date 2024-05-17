@@ -62,17 +62,17 @@ object FileCompactionTest extends SimpleIOSuite {
 
   test("Compaction on old compaction files does not perform compaction") {
     Files[IO].tempDirectory.use { dir =>
-      val hintFile = dir / "hint.1.db"
+      val keysFile = dir / "keys.1.db"
       val valuesFile = dir / "values.1.db"
       for {
-        _ <- Files[IO].createFile(hintFile)
+        _ <- Files[IO].createFile(keysFile)
         _ <- Files[IO].createFile(valuesFile)
         _ <- FileCompaction.run[IO](dir)
         files <- getCompactionFiles(dir)
       } yield matches(files) { case compactionFile :: Nil =>
         expect.all(
           compactionFile.timestamp === 1,
-          compactionFile.hint === hintFile,
+          compactionFile.keys === keysFile,
           compactionFile.values === valuesFile
         )
       }
@@ -83,10 +83,10 @@ object FileCompactionTest extends SimpleIOSuite {
     "Compaction on an active datafile and old compaction files does not perform compaction (compaction process was called before file rotation)"
   ) {
     Files[IO].tempDirectory.use { dir =>
-      val hintFile = dir / "hint.1.db"
+      val keysFile = dir / "keys.1.db"
       val valuesFile = dir / "values.1.db"
       for {
-        _ <- Files[IO].createFile(hintFile)
+        _ <- Files[IO].createFile(keysFile)
         _ <- Files[IO].createFile(valuesFile)
         _ <- Files[IO].createFile(dir / "data.1.db")
         _ <- FileCompaction.run[IO](dir)
@@ -94,7 +94,7 @@ object FileCompactionTest extends SimpleIOSuite {
       } yield matches(files) { case compactionFile :: Nil =>
         expect.all(
           compactionFile.timestamp === 1,
-          compactionFile.hint === hintFile,
+          compactionFile.keys === keysFile,
           compactionFile.values === valuesFile
         )
       }
@@ -103,7 +103,7 @@ object FileCompactionTest extends SimpleIOSuite {
 
   test("Compaction on an inactive datafile and old compaction files performs compaction") {
     Files[IO].tempDirectory.use { dir =>
-      val hintFile = dir / "hint.1.db"
+      val keysFile = dir / "keys.1.db"
       val valuesFile = dir / "values.1.db"
       for {
         _ <- fs2.Stream
@@ -113,7 +113,7 @@ object FileCompactionTest extends SimpleIOSuite {
               KeyValue(Key("key2"), "value1".getBytes)
             )
           )
-          .through(CompactionFilesUtil.writeKeyValueEntries(dir, timestamp = 1.millis))
+          .through(CompactionFilesUtil.writeKeyValueToCompactionFiles(dir, timestamp = 1.millis))
           .compile
           .drain
         _ <- appendEntriesToDataFile(
@@ -346,7 +346,7 @@ object FileCompactionTest extends SimpleIOSuite {
 
       case many =>
         IO.raiseError(
-          new Throwable(many.map(file => s"Found extra ${file.hint} and ${file.values}").mkString("\n"))
+          new Throwable(many.map(file => s"Found extra ${file.keys} and ${file.values}").mkString("\n"))
         )
     }
 
