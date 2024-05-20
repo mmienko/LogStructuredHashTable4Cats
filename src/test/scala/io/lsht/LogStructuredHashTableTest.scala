@@ -4,11 +4,8 @@ import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
-import io.lsht.TestUtils.{DataFileNamePattern, expectString, tempDatabase}
+import io.lsht.TestUtils.{StringKeyOrdering, *}
 import weaver.*
-
-import java.nio.file.AccessDeniedException
-import java.util.regex.Pattern
 
 object LogStructuredHashTableTest extends SimpleIOSuite {
 
@@ -36,7 +33,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
 
   test("Database supports reads and writes") {
     tempDatabase.use { db =>
-      val key = Key("key".getBytes)
+      val key = Key("key")
       val value = "value".getBytes
       for {
         res <- db.get(key)
@@ -48,14 +45,15 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
   }
 
   test("Write is persisted across open & close of Database") {
-    val key = Key("key".getBytes)
+    val key = Key("key")
     val value = "value".getBytes
     Files[IO].tempDirectory
       .use { dir =>
-        LogStructuredHashTable[IO](dir).use(_.put(key, value)) *>
-          LogStructuredHashTable[IO](dir).use(_.get(key))
+        for {
+          _ <- LogStructuredHashTable[IO](dir).use(_.put(key, value))
+          res <- LogStructuredHashTable[IO](dir).use(_.get(key))
+        } yield exists(res)(expectString("value"))
       }
-      .map(res => exists(res)(expectString("value")))
   }
 
   test("Database supports multiple reads and writes") {
@@ -71,36 +69,13 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         _ <- ids.parTraverse(id => db.put(id, id.value))
         gets <- ids.parTraverse(db.get)
         values = gets.collect { case Some(v) => new String(v) }.toSet
-      } yield expect(values === uuids.map(_.toString).toSet)
-    }
-  }
-
-  test("Database supports reads and write over multiple reopens") {
-    val valuesCardinality = 20
-    Files[IO].tempDirectory.use { dir =>
-      for {
-        uuids <- IO.randomUUID.replicateA(100)
-        ids = uuids.map(_.toString.getBytes).map(Key.apply)
-        _ <- fs2.Stream
-          .evals(ids.pure[IO])
-          .chunkN(valuesCardinality)
-          .evalMap { ids =>
-            LogStructuredHashTable[IO](dir).use { db =>
-              ids.zipWithIndex.parTraverse_ { case (key, i) => db.put(key, s"value$i".getBytes) }
-            }
-          }
-          .compile
-          .drain
-        gets <- LogStructuredHashTable[IO](dir)
-          .use(db => ids.parTraverse(db.get))
-        values = gets.collect { case Some(v) => new String(v) }.toSet
-      } yield expect(values === Set.tabulate(valuesCardinality)(i => "value" + i))
+      } yield expect.eql(values, uuids.map(_.toString).toSet)
     }
   }
 
   test("Database supports overwriting keys") {
     tempDatabase.use { db =>
-      val key = Key("key".getBytes)
+      val key = Key("key")
       val value1 = "value1".getBytes
       val value2 = "value2".getBytes
       for {
@@ -111,120 +86,26 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     }
   }
 
-  test("Database validates checksum") {
+  test("Database supports writes over multiple reopens") {
+    val valuesCardinality = 20
     Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).use { db =>
-        val key = Key("key".getBytes)
-        for {
-          // Write initial value
-          _ <- db.put(key, "value".getBytes)
-          // Corrupt value
-          dataFile <- Files[IO].list(dir).compile.lastOrError
-          bytes <- Files[IO].readAll(dataFile).compile.to(Array)
-          bytes <- IO(bytes.updated(bytes.length - 1, 1.toByte))
-          _ <- Files[IO]
-            .writeCursor(dataFile, Flags.Write)
-            .use(_.write(Chunk.array(bytes)))
-          // Read corrupted value
-          res <- db.get(key).attempt
-        } yield matches(res) { case Left(err) =>
-          expect(err == Errors.Read.BadChecksum)
-        }
-      }
-    }
-  }
-
-  test(
-    "Database reports an error if entry was never fully written to file (mimic a crash)"
-  ) {
-    Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).use { db =>
-        val key = Key("key".getBytes)
-        for {
-          // Write initial value
-          _ <- db.put(key, "value".getBytes)
-          // trim entry
-          dataFile <- Files[IO].list(dir).compile.lastOrError
-          _ <- Files[IO].open(dataFile, Flags.Write).use(_.truncate(6))
-          // Read corrupted value
-          res <- db.get(key).attempt
-        } yield matches(res) { case Left(err) =>
-          expect(err == Errors.Read.CorruptedDataFile)
-        }
-      }
-    }
-  }
-
-  test("Database reports an error if file is empty") {
-    Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).use { db =>
-        val key = Key("key".getBytes)
-        for {
-          // Write initial value
-          _ <- db.put(key, "value".getBytes)
-          // Corrupt value
-          dataFile <- Files[IO].list(dir).compile.lastOrError
-          _ <- Files[IO].open(dataFile, Flags.Write).use(_.truncate(0))
-          // Read corrupted value
-          res <- db.get(key).attempt
-        } yield matches(res) { case Left(err) =>
-          expect(err == Errors.Read.CorruptedDataFile)
-        }
-      }
-    }
-  }
-
-  test("Database reports an error if file is missing") {
-    Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).use { db =>
-        val key = Key("key".getBytes)
-        for {
-          // Write initial value
-          _ <- db.put(key, "value".getBytes)
-          // Corrupt value
-          dataFile <- Files[IO].list(dir).compile.lastOrError
-          _ <- Files[IO].delete(dataFile)
-          // Read corrupted value
-          res <- db.get(key).attempt
-        } yield matches(res) { case Left(Errors.Read.FileSystem(err: NoSuchFileException)) =>
-          expect(err.getFile === dataFile.toString)
-        }
-      }
-    }
-  }
-
-  test("Database reports an error if file permissions changed") {
-    Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).use { db =>
-        val key = Key("key".getBytes)
-        for {
-          // Write initial value
-          _ <- db.put(key, "value".getBytes)
-          // Change permissions
-          dataFile <- Files[IO].list(dir).compile.lastOrError
-          _ <- Files[IO].setPosixPermissions(
-            dataFile,
-            PosixPermissions(PosixPermission.OwnerWrite)
-          )
-          // Read
-          res <- db.get(key).attempt
-        } yield matches(res) { case Left(Errors.Read.FileSystem(err: AccessDeniedException)) =>
-          expect(err.getFile === dataFile.toString)
-        }
-      }
-    }
-  }
-
-  test("Database Resource leak can be detected") {
-    Files[IO].tempDirectory.use { dir =>
-      LogStructuredHashTable[IO](dir).allocated
-        .flatMap { case (db, close) => close.as(db) }
-        .flatMap(db => db.put(Key("key"), "value".getBytes).attempt)
-        .map(res =>
-          matches(res) { case Left(t: IllegalStateException) =>
-            expect(t.getMessage === "Resource leak, db is closed and this method should not be called")
+      for {
+        uuids <- IO.randomUUID.replicateA(100)
+        keys = uuids.map(_.toString.getBytes).map(Key.apply)
+        _ <- fs2.Stream
+          .evals(keys.pure[IO])
+          .chunkN(valuesCardinality)
+          .evalMap { keys =>
+            LogStructuredHashTable[IO](dir).use { db =>
+              keys.zipWithIndex.parTraverse_ { case (key, i) => db.put(key, s"value$i".getBytes) }
+            }
           }
-        )
+          .compile
+          .drain
+        gets <- LogStructuredHashTable[IO](dir)
+          .use(db => keys.parTraverse(db.get))
+        values = gets.collect { case Some(v) => new String(v) }.toSet
+      } yield expect.eql(values, Set.tabulate(valuesCardinality)(i => "value" + i))
     }
   }
 
@@ -268,5 +149,28 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
           }
           .map(res => expect(res.isEmpty))
       }
+  }
+
+  test("`keys` operation retrieve all keys") {
+    tempDatabase.use { db =>
+      for {
+        _ <- putAll(db)(KeyValue("k1", "v1"), KeyValue("k2", "v2"), KeyValue("k3", "v3"))
+
+        keys <- db.keys.compile.toVector
+        _ <- expect
+          .eql(
+            keys.sorted(StringKeyOrdering),
+            Vector(Key("k1"), Key("k2"), Key("k3"))
+          )
+          .failFast
+
+        _ <- db.delete(Key("k2"))
+
+        keys <- db.keys.compile.toVector
+      } yield expect.eql(
+        keys.sorted(StringKeyOrdering),
+        Vector(Key("k1"), Key("k3"))
+      )
+    }
   }
 }

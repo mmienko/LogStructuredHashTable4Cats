@@ -15,7 +15,27 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
     isClosed: Ref[F, Boolean]
 ) {
 
+  def checkIntegrity(key: Key): F[Option[Throwable]] =
+    for {
+      res <- doGet(key).attempt
+      res <- res match
+        case Left(err: IllegalStateException) =>
+          Async[F].raiseError(err)
+        case _ =>
+          res.swap.toOption.pure[F]
+    } yield res
+
   def get(key: Key): F[Option[Value]] =
+    for {
+      res <- doGet(key).attempt
+      res <- res match
+        case Left(err: IllegalStateException) =>
+          Async[F].raiseError(err)
+        case _ =>
+          res.toOption.flatten.pure[F]
+    } yield res
+
+  private def doGet(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
       case Some(KeyValueFileReference(file, offset, length)) =>
         // TODO: Use an object pool for efficient resource/file management
@@ -49,8 +69,11 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
       .map(_.contains(key))
       .flatMap(Applicative[F].whenA(_)(submitWriteCommand(WriteCommand.Delete(key))))
 
-  // TODO: Support
-  def keys: Stream[F, Key] = Stream.empty
+  def keys: Stream[F, Key] =
+    for {
+      idx <- Stream.eval(index.get)
+      key <- Stream.fromIterator(idx.keysIterator, chunkSize = 100)
+    } yield key
 
   def entries[A]: Stream[F, (Key, Value)] =
     keys

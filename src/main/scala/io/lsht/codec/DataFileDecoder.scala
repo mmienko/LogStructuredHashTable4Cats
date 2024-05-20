@@ -127,7 +127,7 @@ object DataFileDecoder {
               )
 
             case None =>
-              Pull.raiseError(Errors.Startup.MissingValueSize)
+              Pull.output1((Errors.Startup.MissingValueSize.asLeft[A | Tombstone], ks.offset))
           }
 
         // Read the full Key-Value entry and decode it, or error
@@ -147,8 +147,7 @@ object DataFileDecoder {
               } yield ()
 
             case None =>
-              // TODO: errors, ideally include offsets in errors
-              Pull.raiseError(Errors.Startup.MissingKeyValueEntry)
+              Pull.output1((Errors.Startup.MissingKeyValueEntry.asLeft[A | Tombstone], keyHeader.offset))
           }
     }
 

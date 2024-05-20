@@ -44,7 +44,7 @@ object Database {
   //  start times. So first few bytes of file would contain a pointer to another spot in file, only needed
   //  for large files. There is a readRage
 
-  // TODO: s/Console/Logger
+  // TODO: s/Console/Logger/Writer
   def apply[F[_]: Async: Console](directory: Path, entriesLimit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
     Resource.suspend {
       for {
@@ -100,7 +100,7 @@ object Database {
       .compile
       .toVector
 
-  private def loadIndex[F[_]: Async: Console](dataFiles: Vector[Path]) = {
+  private def loadIndex[F[_]: Async: Console](dataFiles: Vector[Path]) =
     Stream
       .emits(dataFiles)
       .flatMap { dataFile =>
@@ -136,7 +136,6 @@ object Database {
             index
         }
       }
-  }
 
   private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, KeyValueFileReference]])(
       cmd: WriteCommand[F]

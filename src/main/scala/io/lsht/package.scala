@@ -28,6 +28,8 @@ type Value = Array[Byte]
 
 object Value {
   given equality: Eq[Array[Byte]] = Eq.instance(_ sameElements _)
+
+  def apply(string: String): Value = string.getBytes
 }
 
 private final case class KeyValue(key: Key, value: Value) {
@@ -36,6 +38,8 @@ private final case class KeyValue(key: Key, value: Value) {
 
 object KeyValue {
   given Eq[KeyValue] = Eq.and(Eq.by(_.key), Eq.by(_.value))
+
+  def apply(key: String, value: String): KeyValue = KeyValue(Key(key), Value(value))
 }
 
 private type WriteResult = Unit | Throwable
