@@ -1,13 +1,13 @@
 package io.lsht
 
 import cats.effect.*
-import cats.effect.std.{Console, Queue, QueueSink, Supervisor}
+import cats.effect.std.{Console, QueueSink}
 import cats.syntax.all.*
-import cats.{Applicative, ApplicativeError, Monad, Monoid, Semigroup}
+import cats.{Applicative, ApplicativeError, Monoid, Semigroup}
+import fs2.Stream
 import fs2.io.file.{Files, Flags, Path}
-import fs2.{Chunk, Stream}
 import io.lsht.LogStructuredHashTable.*
-import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
+import io.lsht.codec.KeyValueCodec
 
 class LogStructuredHashTable[F[_]: Async] private[lsht] (
     queue: QueueSink[F, WriteCommand[F]],

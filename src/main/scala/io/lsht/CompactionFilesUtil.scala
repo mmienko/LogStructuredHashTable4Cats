@@ -3,8 +3,8 @@ package io.lsht
 import cats.data.Validated
 import cats.effect.Async
 import cats.syntax.all.*
+import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
-import fs2.io.file.{Files, Flags, Path, ReadCursor, WriteCursor}
 import io.lsht.codec.{CompactedKeyCodec, CompactedKeysFileDecoder, ValuesCodec}
 import io.lsht.{KeyValue, given_Ordering_Path}
 

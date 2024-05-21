@@ -6,7 +6,6 @@ import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.{Files, Flags, Path}
 import io.lsht.CompactionFilesUtil.attemptListCompactionFiles
-import io.lsht.codec.DataFileDecoder.Tombstone
 import io.lsht.codec.{KeyValueCodec, TombstoneEncoder}
 import weaver.*
 

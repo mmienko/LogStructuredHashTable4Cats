@@ -4,7 +4,7 @@ import cats.Eq
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
 import fs2.io.file.Path
-import Value.equality
+import io.lsht.Value.equality
 
 import java.util
 
@@ -41,6 +41,8 @@ object KeyValue {
 
   def apply(key: String, value: String): KeyValue = KeyValue(Key(key), Value(value))
 }
+
+private type Tombstone = Key
 
 private type WriteResult = Unit | Throwable
 

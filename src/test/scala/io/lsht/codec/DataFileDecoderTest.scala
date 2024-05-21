@@ -5,7 +5,7 @@ import fs2.Chunk
 import fs2.io.file.Path
 import io.lsht.codec.CodecCommons.ChecksumSize
 import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
-import io.lsht.{KeyValueFileReference, Key, KeyValue}
+import io.lsht.{Key, KeyValue, KeyValueFileReference, Tombstone}
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -39,7 +39,7 @@ object DataFileDecoderTest extends SimpleIOSuite {
       .compile
       .lastOrError
       .map { case (result, offset) =>
-        matches(result) { case Right(resultTombstone: DataFileDecoder.Tombstone) =>
+        matches(result) { case Right(resultTombstone: Tombstone) =>
           expect(new String(resultTombstone.value) === "key1")
         } and expect(offset === 0)
       }

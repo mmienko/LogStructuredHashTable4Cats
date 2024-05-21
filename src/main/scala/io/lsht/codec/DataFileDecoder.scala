@@ -11,8 +11,6 @@ import scala.util.control.NoStackTrace
 
 object DataFileDecoder {
 
-  // TODO: move to package
-  type Tombstone = Key
   // TODO: Adt's instead of |
   type ParsedKeyValue = ParsedHeaderState[KeyValue]
   type ParsedKeyValueFileReference = Either[Throwable, (Key, KeyValueFileReference) | Tombstone]

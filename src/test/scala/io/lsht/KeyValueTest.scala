@@ -1,7 +1,7 @@
 package io.lsht
 
-import weaver._
-import cats.syntax.all._
+import cats.syntax.all.*
+import weaver.*
 
 object KeyValueTest extends SimpleIOSuite {
 

@@ -6,7 +6,6 @@ import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError, Monad}
 import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
-import io.lsht.codec.DataFileDecoder.Tombstone
 import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
 
 object Database {
