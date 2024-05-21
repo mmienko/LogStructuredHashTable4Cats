@@ -70,7 +70,7 @@ object Database {
 
         isClosed <- Ref[F].of(false)
 
-        cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(Errors.Write.Cancelled)))
+        cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(DatabaseIsClosed)))
       } yield Supervisor[F](await = false)
         .evalMap(_.supervise(seriallyExecuteWrites))
         .onFinalize(isClosed.set(true) >> cancelRemainingCommands)
@@ -82,7 +82,7 @@ object Database {
       .isDirectory(directory, followLinks = false)
       .flatMap {
         ApplicativeError[F, Throwable]
-          .raiseUnless(_)(Errors.Startup.PathNotADirectory)
+          .raiseUnless(_)(PathNotADirectory)
       }
 
   private def getFiles[F[_]: Async: Console](directory: Path): F[Vector[Path]] =
@@ -112,7 +112,7 @@ object Database {
       .evalTap {
         case (Left(err), offset, file) =>
           Console[F]
-            .println(err.toString + s" at offset $offset in file $file")
+            .println(s"Startup Error during loading index: ${err.toString} at offset $offset in file $file")
         case _ =>
           Applicative[F].unit
       }
@@ -187,24 +187,6 @@ object Database {
       .map(_.some)
       .flatMap(queue.tryTakeN)
 
-  private def guaranteeCommandCompletes[F[_]: Sync, A](
-      writeCmd: WriteCommand[F]
-  )(fa: F[A], onCancel: => Errors.WriteException): F[A] =
-    MonadCancel[F].guaranteeCase(fa) {
-      case Outcome.Succeeded(_) => ().pure[F]
-      case Outcome.Errored(e) => writeCmd.complete(Errors.Write.Failed(e)).void
-      case Outcome.Canceled() => writeCmd.complete(onCancel).void
-    }
-
-  private def guaranteeCommandCompletes[F[_]: Sync, A](
-      signal: Deferred[F, WriteResult]
-  )(fa: F[A], onCancel: => Errors.WriteException): F[A] =
-    MonadCancel[F].guaranteeCase(fa) {
-      case Outcome.Succeeded(_) => ().pure[F]
-      case Outcome.Errored(e) => signal.complete(Errors.Write.Failed(e)).void
-      case Outcome.Canceled() => signal.complete(onCancel).void
-    }
-
   // TODO: Rotation threshold could be more sophisticated; instead of a simple count of of entries,
   //  there could be a measure of the number of rewrites to keys. The more rewrites, the more the
   //  file can be compacted, thus saving space during compaction. Database startup times to load
@@ -270,6 +252,8 @@ object Database {
       onWrite: (Offset, Path) => F[Unit]
   )
 
+  object PathNotADirectory extends Throwable
+  object DatabaseIsClosed extends Throwable
   // TODO: use in DateFileDecoder?
 //  sealed abstract class LoadCommand extends Product with Serializable
 //

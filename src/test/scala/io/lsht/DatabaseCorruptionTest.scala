@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
+import io.lsht.LogStructuredHashTable.ReadErrors
 import io.lsht.LogStructuredHashTableTest.{expect, matches, test}
 import io.lsht.TestUtils.tempDatabaseWithDir
 import io.lsht.Value.equality
@@ -117,7 +118,7 @@ object DatabaseCorruptionTest extends SimpleIOSuite {
         v2 === None,
         v3 === Value("value").some,
         keys === List(Key("key1"), Key("key3"))
-//        check == Errors.Read.BadChecksum
+//        check == ReadErrors.BadChecksum
       )
     }
   }
@@ -138,7 +139,7 @@ object DatabaseCorruptionTest extends SimpleIOSuite {
         _ <- expect.eql(res, None).failFast
         integrity <- db.checkIntegrity(key)
       } yield matches(integrity) { case Some(err) =>
-        expect(err == Errors.Read.CorruptedDataFile)
+        expect(err == ReadErrors.CorruptedDataFile)
       }
     }
   }
@@ -156,7 +157,7 @@ object DatabaseCorruptionTest extends SimpleIOSuite {
         res <- db.get(key)
         _ <- expect.eql(res, None).failFast
         integrity <- db.checkIntegrity(key)
-      } yield matches(integrity) { case Some(Errors.Read.FileSystem(err: NoSuchFileException)) =>
+      } yield matches(integrity) { case Some(ReadErrors.FileSystem(err: NoSuchFileException)) =>
         expect.eql(err.getFile, dataFile.toString)
       }
     }
@@ -178,7 +179,7 @@ object DatabaseCorruptionTest extends SimpleIOSuite {
         res <- db.get(key)
         _ <- expect.eql(res, None).failFast
         integrity <- db.checkIntegrity(key)
-      } yield matches(integrity) { case Some(Errors.Read.FileSystem(err: AccessDeniedException)) =>
+      } yield matches(integrity) { case Some(ReadErrors.FileSystem(err: AccessDeniedException)) =>
         expect.eql(err.getFile, dataFile.toString)
       }
     }

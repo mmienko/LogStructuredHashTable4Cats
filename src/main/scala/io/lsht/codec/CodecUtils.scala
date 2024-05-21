@@ -1,5 +1,6 @@
 package io.lsht.codec
 
+import cats.ApplicativeError
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
@@ -43,4 +44,13 @@ object CodecUtils {
     crc32c.update(bb.slice(4, bbSize - 4))
     crc32c.getValue.toInt == checksum
   }
+
+  def validateCrc[F[_]: Sync](bb: ByteBuffer, bbSize: Int, checksum: Int): F[Unit] =
+    isValidCrc(bb, bbSize, checksum)
+      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(BadChecksum))
+
+  def validateCrc[F[_]: Sync](bytes: Chunk[Byte], checksum: Int): F[Unit] =
+    validateCrc(bytes.toByteBuffer, bytes.size, checksum)
+
+  object BadChecksum extends Throwable
 }

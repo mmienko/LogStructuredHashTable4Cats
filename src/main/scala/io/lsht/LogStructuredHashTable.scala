@@ -42,18 +42,20 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
         Files[F]
           .open(file, Flags.Read)
           .adaptErr { case err: java.nio.file.FileSystemException =>
-            Errors.Read.FileSystem(err)
+            ReadErrors.FileSystem(err)
           }
           .use { fh =>
             for {
               bytes <- fh.read(numBytes = length, offset = offset)
               bytes <- ApplicativeError[F, Throwable]
-                .fromOption(bytes, Errors.Read.CorruptedDataFile)
+                .fromOption(bytes, ReadErrors.CorruptedDataFile)
               _ <- ApplicativeError[F, Throwable]
                 .raiseWhen(bytes.size != length)(
-                  Errors.Read.CorruptedDataFile
+                  ReadErrors.CorruptedDataFile
                 )
-              putValue <- KeyValueCodec.decode(bytes)
+              putValue <- KeyValueCodec
+                .decode(bytes)
+                .adaptError(ReadErrors.FailedToDecode(_))
             } yield putValue.value.some
           }
 
@@ -115,7 +117,7 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
           Applicative[F].unit
         case cause: Throwable =>
           ApplicativeError[F, Throwable]
-            .raiseError[Unit](Errors.Write.Failed(cause))
+            .raiseError[Unit](WriteErrors.Failed(cause))
       }
     } yield ()
 }
@@ -124,5 +126,21 @@ object LogStructuredHashTable {
 
   def apply[F[_]: Async: Console](directory: Path, limit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
     Database(directory, limit)
+
+  class ReadException(cause: Option[Throwable]) extends Throwable(cause.orNull)
+
+  object ReadErrors {
+    final case class FailedToDecode(cause: Throwable) extends ReadException(cause = cause.some)
+
+    object CorruptedDataFile extends ReadException(cause = None)
+
+    final case class FileSystem(cause: java.nio.file.FileSystemException) extends ReadException(cause.some)
+  }
+
+  class WriteException(cause: Option[Throwable]) extends Throwable(cause.orNull)
+
+  object WriteErrors {
+    class Failed(cause: Throwable) extends WriteException(cause.some)
+  }
 
 }

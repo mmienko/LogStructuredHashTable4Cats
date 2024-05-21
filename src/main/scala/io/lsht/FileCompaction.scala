@@ -130,7 +130,7 @@ object FileCompaction {
             bytes <- Pull.eval {
               ApplicativeError[F, Throwable].fromOption(
                 readResult.map(_._2), // Ignore updated read cursor, since we seek in loop
-                Errors.CompactionException.SeekAndReadFailedOnDataFile(valuesFile.get, offset)
+                CompactionException.SeekAndReadFailedOnDataFile(valuesFile.get, offset)
               )
             }
 
@@ -160,7 +160,7 @@ object FileCompaction {
             bytes <- Pull.eval {
               ApplicativeError[F, Throwable].fromOption(
                 readResult.map(_._2), // Ignore updated read cursor, since we seek in loop
-                Errors.CompactionException.SeekAndReadFailedOnDataFile(file, offset)
+                CompactionException.SeekAndReadFailedOnDataFile(file, offset)
               )
             }
 
@@ -187,5 +187,12 @@ object FileCompaction {
       currentFile: Path,
       readCursor: ReadCursor[F]
   )
+
+  class CompactionException(message: String) extends Throwable(message)
+
+  object CompactionException {
+    class SeekAndReadFailedOnDataFile(file: Path, offset: Offset)
+        extends CompactionException(s"Could not read Corrupted DataFile ${file.toString} at offset ${offset.toString}")
+  }
 
 }

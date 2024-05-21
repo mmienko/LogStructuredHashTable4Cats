@@ -1,10 +1,9 @@
 package io.lsht.codec
 
-import cats.ApplicativeError
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.{Errors, Value}
+import io.lsht.Value
 
 import java.nio.ByteBuffer
 
@@ -30,8 +29,7 @@ object ValuesCodec {
     val checksum = bb.getInt
 
     CodecUtils
-      .isValidCrc(bb, bbSize = bytes.size, checksum)
-      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(new ValuesCodecError(Errors.Read.BadChecksum)))
+      .validateCrc(bb, bbSize = bytes.size, checksum)
       .map { _ =>
         val value = Array.fill(bytes.size - HeaderSize)(0.toByte)
         bb.get(value)
@@ -39,5 +37,4 @@ object ValuesCodec {
       }
   }
 
-  class ValuesCodecError(cause: Throwable) extends Throwable(cause)
 }

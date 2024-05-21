@@ -1,9 +1,8 @@
 package io.lsht.codec
 
-import cats.ApplicativeError
 import cats.effect.Sync
 import cats.implicits.*
-import io.lsht.{KeyValue, Errors, Key}
+import io.lsht.{Key, KeyValue}
 import fs2.*
 
 import java.nio.ByteBuffer
@@ -39,8 +38,7 @@ object KeyValueCodec {
     val _ = bb.get // skip tombstone
 
     CodecUtils
-      .isValidCrc(bb, bbSize = bytes.size, checksum)
-      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(Errors.Read.BadChecksum))
+      .validateCrc(bb, bbSize = bytes.size, checksum)
       .flatMap { _ =>
         Sync[F].delay {
           val keySize = bb.getInt

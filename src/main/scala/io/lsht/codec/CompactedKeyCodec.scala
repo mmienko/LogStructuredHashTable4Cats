@@ -1,10 +1,9 @@
 package io.lsht.codec
 
-import cats.ApplicativeError
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.{CompactedKey, CompactedValue, Errors, Key, KeyValue, Offset}
+import io.lsht.*
 
 import java.nio.ByteBuffer
 
@@ -36,8 +35,7 @@ object CompactedKeyCodec {
     val checksum = bb.getInt
 
     CodecUtils
-      .isValidCrc(bb, bbSize = bytes.size, checksum)
-      .flatMap(ApplicativeError[F, Throwable].raiseUnless(_)(new CodecError(Errors.Read.BadChecksum)))
+      .validateCrc(bb, bbSize = bytes.size, checksum)
       .flatMap { _ =>
         Sync[F].delay {
           val keySize = bb.getInt
@@ -51,5 +49,4 @@ object CompactedKeyCodec {
       }
   }
 
-  class CodecError(cause: Throwable) extends Throwable(cause)
 }

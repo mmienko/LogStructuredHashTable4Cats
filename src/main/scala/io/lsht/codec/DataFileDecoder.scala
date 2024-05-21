@@ -7,8 +7,11 @@ import fs2.{Chunk, Pipe, Pull}
 import io.lsht.*
 import io.lsht.codec.KeyValueCodec.ValueSizeSize
 
+import scala.util.control.NoStackTrace
+
 object DataFileDecoder {
 
+  // TODO: move to package
   type Tombstone = Key
   // TODO: Adt's instead of |
   type ParsedKeyValue = ParsedHeaderState[KeyValue]
@@ -28,7 +31,7 @@ object DataFileDecoder {
   }
 
   def decodeAsFileReference[F[_]: Sync](dataFile: Path): Pipe[F, Byte, ParsedKeyValueFileReference] = {
-    val p = decodeKeyValueState { kvHeader =>
+    val pipe = decodeKeyValueState { kvHeader =>
       val keyHeader = kvHeader.keyHeader
       KeyValuePull[F, (Key, KeyValueFileReference)](
         keyHeader.keySize,
@@ -42,15 +45,15 @@ object DataFileDecoder {
                 bytes = keyHeader.bytes ++ kvHeader.bytes ++ keyBytes
               )
             )
-            .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
+            .adaptError(FailedToDecodeKeyValueFileReference(_))
       )
     }
 
-    in => in.through(p).map(_._1)
+    in => in.through(pipe).map(_._1.leftMap(FailedToDecodeKeyValueFileReference(_)))
   }
 
   def decode[F[_]: Sync]: Pipe[F, Byte, ParsedKeyValue] = {
-    decodeKeyValueState { kvHeader =>
+    val pipe = decodeKeyValueState { kvHeader =>
       val keyHeader = kvHeader.keyHeader
       val dataSize = keyHeader.keySize + kvHeader.valueSize
       KeyValuePull(
@@ -58,11 +61,16 @@ object DataFileDecoder {
         entryBytes =>
           Pull
             .eval(KeyValueCodec.decode(keyHeader.bytes ++ kvHeader.bytes ++ entryBytes))
-            .adaptErr { case Errors.Read.BadChecksum => Errors.Startup.BadChecksum }
+            .adaptError(FailedToDecodeKeyValue(_))
       )
     }
+
+    in => in.through(pipe).map(parsedKv => (parsedKv._1.leftMap(FailedToDecodeKeyValue(_)), parsedKv._2))
   }
 
+  /*
+  Note: it may be cleaner to move the state transitions out of the recursive call, but leaving for now.
+   */
   private def decodeKeyValueState[F[_]: Sync, A](
       pullKeyValue: HeaderState.KeyValue => KeyValuePull[F, A]
   ): Pipe[F, Byte, ParsedHeaderState[A]] = {
@@ -70,13 +78,14 @@ object DataFileDecoder {
         s: fs2.Stream[F, Byte],
         currentOffset: Offset,
         headerState: Option[HeaderState]
-    ): Pull[F, ParsedHeaderState[A], Unit] = {
+    ): Pull[F, ParsedHeaderState[A], Unit] =
       headerState match
         /*
         Read the Common Header and determine if we should decode a Tombstone or Key-Value entry. Otherwise we are at
         the end of the stream.
          */
         case None =>
+          // TODO: if less than HeaderSize, then header is incomplete
           s.pull.unconsN(CodecUtils.CommonHeaderSize).flatMap {
             case Some((headerBytes, tail)) =>
               val bb = headerBytes.toByteBuffer
@@ -98,16 +107,15 @@ object DataFileDecoder {
           s.pull.unconsN(keySize).flatMap {
             case Some((keyBytes, tail)) =>
               Pull
-                .eval(CodecUtils.isValidCrc[F](bytes = headerBytes ++ keyBytes, checksum))
-                .flatMap(isValid =>
-                  if isValid then Pull.pure(Key(keyBytes.toArray)) else Pull.raiseError(Errors.Startup.BadChecksum)
-                )
+                .eval(CodecUtils.validateCrc[F](bytes = headerBytes ++ keyBytes, checksum))
+                .adaptError(FailedToDecodeTombstone(_))
+                .as(Key(keyBytes.toArray))
                 .attempt
-                .flatMap(key => Pull.output1((key, offset)))
+                .flatMap(res => Pull.output1((res, offset)))
                 >> go(tail, currentOffset = currentOffset + keySize, headerState = None)
 
             case None =>
-              Pull.raiseError(Errors.Startup.MissingTombstoneKey)
+              Pull.output1((FailedToDecodeTombstone(MissingTombstoneKey).asLeft[A | Tombstone], offset))
           }
 
         // Read the value size and go to read the rest of Key-Value entry, or error
@@ -127,7 +135,7 @@ object DataFileDecoder {
               )
 
             case None =>
-              Pull.output1((Errors.Startup.MissingValueSize.asLeft[A | Tombstone], ks.offset))
+              Pull.output1((MissingValueSize.asLeft[A | Tombstone], ks.offset))
           }
 
         // Read the full Key-Value entry and decode it, or error
@@ -147,9 +155,8 @@ object DataFileDecoder {
               } yield ()
 
             case None =>
-              Pull.output1((Errors.Startup.MissingKeyValueEntry.asLeft[A | Tombstone], keyHeader.offset))
+              Pull.output1((MissingKeyValueEntry.asLeft[A | Tombstone], keyHeader.offset))
           }
-    }
 
     in => go(in, currentOffset = 0, headerState = None).stream
   }
@@ -180,4 +187,10 @@ object DataFileDecoder {
       handleBytes: Chunk[Byte] => Pull[F, Nothing, A]
   )
 
+  final class FailedToDecodeKeyValueFileReference(cause: Throwable) extends Throwable(cause)
+  final class FailedToDecodeKeyValue(cause: Throwable) extends Throwable(cause)
+  final class FailedToDecodeTombstone(cause: Throwable) extends Throwable(cause)
+  object MissingTombstoneKey extends Throwable with NoStackTrace
+  object MissingValueSize extends Throwable with NoStackTrace
+  object MissingKeyValueEntry extends Throwable with NoStackTrace
 }

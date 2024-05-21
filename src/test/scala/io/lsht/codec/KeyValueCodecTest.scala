@@ -3,8 +3,9 @@ package io.lsht.codec
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
+import io.lsht.LogStructuredHashTable.ReadErrors
 import io.lsht.codec.CodecCommons.*
-import io.lsht.{Errors, Key, KeyValue}
+import io.lsht.{Key, KeyValue}
 import weaver.*
 
 import java.nio.ByteBuffer
@@ -206,7 +207,7 @@ object KeyValueCodecTest extends SimpleIOSuite {
       )
       res <- KeyValueCodec.decode(Chunk.byteBuffer(bytes)).attempt
     } yield matches(res) { case Left(error) =>
-      expect(error == Errors.Read.BadChecksum)
+      expect(error == CodecUtils.BadChecksum)
     }
   }
 
