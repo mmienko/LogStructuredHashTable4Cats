@@ -4,8 +4,11 @@ import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
-import io.lsht.TestUtils.{StringKeyOrdering, *}
+import io.lsht.TestUtils.{StringKeyOrdering, given_Show_Array, writeToCompactionFile, *}
+import io.lsht.Value.equality
 import weaver.*
+
+import scala.concurrent.duration.*
 
 object LogStructuredHashTableTest extends SimpleIOSuite {
 
@@ -171,6 +174,32 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
         keys.sorted(StringKeyOrdering),
         Vector(Key("k1"), Key("k3"))
       )
+    }
+  }
+
+  test("Database can read keys from compacted files") {
+    tempDirectory.use { dir =>
+      for {
+        _ <- writeToCompactionFile(dir, timestamp = 1.millis, KeyValue("key1", "value1"))
+        value <- Database[IO](dir).use(_.get(Key("key1")))
+        _ <- expect.eql(Value("value1").some, value).failFast
+        _ <- Database[IO](dir).use(_.delete(Key("key1")))
+        value <- Database[IO](dir).use(_.get(Key("key1")))
+      } yield expect(value.isEmpty)
+    }
+  }
+
+  test("Database takes latest keys from data files over compacted files") {
+    tempDirectory.use { dir =>
+      for {
+        _ <- writeToCompactionFile(dir, timestamp = 1.millis, KeyValue("key1", "value1"), KeyValue("key2", "value1"))
+        _ <- appendEntriesToDataFile(dir / "data.1.db", KeyValue("key2", "value2"), KeyValue("key3", "value1"))
+        value <- Database[IO](dir).use(_.get(Key("key1")))
+        _ <- expect.eql(Value("value1").some, value).failFast
+        value <- Database[IO](dir).use(_.get(Key("key2")))
+        _ <- expect.eql(Value("value2").some, value).failFast
+        value <- Database[IO](dir).use(_.get(Key("key3")))
+      } yield expect.eql(Value("value1").some, value)
     }
   }
 }

@@ -1,14 +1,9 @@
 1) Add tests for creating a new DB, util to drop db (or eventually a method) which executes after every test.
    1) Write and read large values; large keys (is there a max key size?) and values
 2) Implement Delete method and add tests. Add some edge case tests around certain usage pattens like deleting everything.
-3) Implement rotating files
+3) Clean up TODO's and/or turn them in comments/roadmap
 4) Implement compaction
-   1) Test basics of compaction, w/o worrying about failed compaction processes
-   2) Review naming
-   3) Review error translation
-   4) Review test organization and method
-   5) Review TODO's and compiler warnings
-   6) Implement End to End tests, write values, wait for compaction, read, etc.
+   1) Implement End to End tests, write values, wait for compaction, read, etc.
 5) Write TLA+ specs
 6) Refine tests around crashes
    1) Crash during rotation

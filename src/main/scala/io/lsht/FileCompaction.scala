@@ -25,7 +25,7 @@ object FileCompaction {
       for {
         now <- Clock[F].realTime
 
-        allCompactedFiles <- getCompactionFiles(databaseDirectory)
+        allCompactedFiles <- CompactionFilesUtil.getValidCompactionFiles(databaseDirectory)
 
         compactedFilesWithIndex <- allCompactedFiles.lastOption.traverse { compactedFiles =>
           Files[F]
@@ -81,14 +81,6 @@ object FileCompaction {
         }
       } yield ()
     }
-
-  private def getCompactionFiles[F[_]: Async: Console](dir: Path) =
-    for {
-      filesOrErrors <- CompactionFilesUtil.attemptListCompactionFiles(dir)
-      _ <- filesOrErrors
-        .collect { case Left(x) => x }
-        .traverse_(err => Console[F].println(s"Failed to read a set of compaction files. $err"))
-    } yield filesOrErrors.collect { case Right(x) => x }
 
   private def getInactiveDatafiles[F[_]: Async](dir: Path): F[List[Path]] =
     Files[F].list(dir).compile.toList.map { files =>

@@ -7,11 +7,11 @@ import cats.{Applicative, ApplicativeError, Monoid, Semigroup}
 import fs2.Stream
 import fs2.io.file.{Files, Flags, Path}
 import io.lsht.LogStructuredHashTable.*
-import io.lsht.codec.KeyValueCodec
+import io.lsht.codec.{KeyValueCodec, ValuesCodec}
 
 class LogStructuredHashTable[F[_]: Async] private[lsht] (
     queue: QueueSink[F, WriteCommand[F]],
-    index: Ref[F, Map[Key, KeyValueFileReference]],
+    index: Ref[F, Map[Key, FileReference]],
     isClosed: Ref[F, Boolean]
 ) {
 
@@ -37,25 +37,32 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
 
   private def doGet(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
-      case Some(KeyValueFileReference(file, offset, length)) =>
+      case Some(fileReference) =>
         // TODO: Use an object pool for efficient resource/file management
         Files[F]
-          .open(file, Flags.Read)
+          .open(fileReference.file, Flags.Read)
           .adaptErr { case err: java.nio.file.FileSystemException =>
             ReadErrors.FileSystem(err)
           }
           .use { fh =>
+            val length = fileReference.length
             for {
-              bytes <- fh.read(numBytes = length, offset = offset)
+              bytes <- fh.read(numBytes = length, offset = fileReference.offset)
               bytes <- ApplicativeError[F, Throwable]
                 .fromOption(bytes, ReadErrors.CorruptedDataFile)
               _ <- ApplicativeError[F, Throwable]
                 .raiseWhen(bytes.size != length)(
                   ReadErrors.CorruptedDataFile
                 )
-              putValue <- KeyValueCodec
-                .decode(bytes)
-                .adaptError(ReadErrors.FailedToDecode(_))
+              putValue <- (fileReference match
+                case _: KeyValueFileReference =>
+                  KeyValueCodec
+                    .decode(bytes)
+                case _: CompactedValueReference =>
+                  ValuesCodec
+                    .decode(bytes)
+                    .map(KeyValue(key, _))
+              ).adaptError(ReadErrors.FailedToDecode(_))
             } yield putValue.value.some
           }
 

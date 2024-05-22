@@ -81,6 +81,12 @@ object WriteCommand {
 
 private type Offset = Long
 
+private sealed trait FileReference {
+  def file: Path
+  def offset: Offset
+  def length: Int
+}
+
 /**
   * Serialized KeyValue record in a DataFile
   * @param file
@@ -90,13 +96,15 @@ private type Offset = Long
   * @param length
   *   length of serialized KeyValue record (header data included)
   */
-private final case class KeyValueFileReference(file: Path, offset: Offset, length: Int)
+private final case class KeyValueFileReference(file: Path, offset: Offset, length: Int) extends FileReference
 
 object KeyValueFileReference {
   given Eq[KeyValueFileReference] = Eq.instance { (a, b) =>
     a.file === b.file && a.offset == b.offset && a.length === b.length
   }
 }
+
+private final case class CompactedValueReference(file: Path, offset: Offset, length: Int) extends FileReference
 
 private given Ordering[Path] = (x: Path, y: Path) => x.fileName.toString.compare(y.fileName.toString)
 

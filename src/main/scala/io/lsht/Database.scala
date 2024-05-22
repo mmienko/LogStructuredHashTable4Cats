@@ -6,23 +6,11 @@ import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError, Monad}
 import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
-import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
+import io.lsht.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, TombstoneEncoder, ValuesCodec}
 
 object Database {
 
   /*
-    Seems easiest, from rotating pov to have "active writer file" and "older data files" have same name, but use
-    a timestamp to differentiate between the two. As a matter of fact, on each new startup, simply create a new
-    "active writer file", and let the previous "active writer file" be an "older data files". Compaction will
-    handle cleaning up the files.
-
-    The database is opened after a clean close. Therefore,
-      -- there is an active writer file
-      -- there *may* be older data files
-      -- there *may* be merged data files w/ corresponding hint files
-    If there are merged data files and older data files, then older data files should take precedence
-    as they could contain the latest values for keys. So precedence order is
-    "active file" > "older data file" > "merged data file".
 
     The database is opened after a crash close. Therefore,
       -- compaction is incomplete
@@ -49,11 +37,7 @@ object Database {
       for {
         _ <- verifyPathIsDirectory[F](directory)
 
-        files <- getFiles(directory)
-
-        dataFiles = files.filter(_.fileName.toString.startsWith("data.")).sorted
-
-        index <- Ref.ofEffect(loadIndex(dataFiles))
+        index <- Ref.ofEffect(loadIndex(directory))
 
         queue <- Queue.unbounded[F, WriteCommand[F]]
 
@@ -99,44 +83,79 @@ object Database {
       .compile
       .toVector
 
-  private def loadIndex[F[_]: Async: Console](dataFiles: Vector[Path]) =
-    Stream
-      .emits(dataFiles)
-      .flatMap { dataFile =>
-        Files[F]
-          .readAll(dataFile)
-          .through(DataFileDecoder.decode[F])
-          .map(x => (x._1, x._2, dataFile))
-      }
-      .evalTap {
-        case (Left(err), offset, file) =>
-          Console[F]
-            .println(s"Startup Error during loading index: ${err.toString} at offset $offset in file $file")
-        case _ =>
-          Applicative[F].unit
-      }
-      .compile
-      .fold(Map.empty[Tombstone, KeyValueFileReference]) { case (index, res) =>
-        res match {
-          case (Right(kv: KeyValue), offset, dataFile) =>
-            index.updated(
-              kv.key,
-              KeyValueFileReference(
-                dataFile,
-                offset = offset,
-                length = KeyValueCodec.size(kv)
-              )
-            )
+  private def loadIndex[F[_]: Async: Console](directory: Path): F[Map[Key, FileReference]] =
+    for {
+      files <- getFiles(directory)
 
-          case (Right(key: Tombstone), _, _) =>
-            index.removed(key)
+      compactedFiles <- CompactionFilesUtil.getValidCompactionFiles(directory).map(_.lastOption)
 
-          case _ =>
-            index
+      initialIndex <- (compactedFiles match
+        case Some(CompactedFiles(keysFile, valuesFile, _)) =>
+          Files[F]
+            .readAll(keysFile)
+            .through(CompactedKeysFileDecoder.decode)
+            .evalMapFilter {
+              case Left(error) =>
+                Console[F]
+                  .println(s"Startup Error during loading index: ${error.toString} in file $keysFile")
+                  .as(none[(Key, CompactedValueReference)])
+
+              case Right(CompactedKey(key, CompactedValue(offset, length))) =>
+                (key, CompactedValueReference(file = valuesFile, offset, length + ValuesCodec.HeaderSize)).some.pure[F]
+            }
+
+        case None =>
+          Stream.empty
+      ).compile
+        .fold(Map.empty[Key, FileReference]) { case (index, (key, fr)) => index.updated(key, fr) }
+
+      dataFiles = files.filter(_.fileName.toString.startsWith("data.")).sorted
+
+      index <- Stream
+        .emits(dataFiles)
+        .flatMap { dataFile =>
+          Files[F]
+            .readAll(dataFile)
+            .through(DataFileDecoder.decode[F])
+            .map(x => (x._1, x._2, dataFile))
         }
-      }
+        .evalTap {
+          case (Left(err), offset, file) =>
+            Console[F]
+              .println(s"Startup Error during loading index: ${err.toString} at offset $offset in file $file")
+          case _ =>
+            Applicative[F].unit
+        }
+        .compile
+        .fold(initialIndex) { case (index, res) =>
+          res match {
+            case (Right(kv: KeyValue), offset, dataFile) =>
+              index.updated(
+                kv.key,
+                KeyValueFileReference(
+                  dataFile,
+                  offset = offset,
+                  length = KeyValueCodec.size(kv)
+                )
+              )
 
-  private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, KeyValueFileReference]])(
+            case (Right(key: Tombstone), _, _) =>
+              /*
+              This process loads data from oldest to newest, so values are kept until they are deleted. It may
+              be more advantageous to instead load from more recent to oldest. Then keys and values are kept
+              with certainty and the index updates are purely additive between files. Since data files can
+              only be read from beginning of file (the log is like a singly linked list), then within the
+              processing of a file, there may be deletes.
+               */
+              index.removed(key)
+
+            case _ =>
+              index
+          }
+        }
+    } yield index
+
+  private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, FileReference]])(
       cmd: WriteCommand[F]
   ): F[Option[BytesToFile[F]]] =
     cmd match // tODO: guaranteeCommandCompletes

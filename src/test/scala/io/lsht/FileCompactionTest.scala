@@ -5,7 +5,8 @@ import cats.effect.IO
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.{Files, Flags, Path}
-import io.lsht.CompactionFilesUtil.attemptListCompactionFiles
+import io.lsht.CompactionFilesUtil.{attemptListCompactionFiles, writeKeyValueToCompactionFiles}
+import io.lsht.TestUtils.{given_Show_Key, *}
 import io.lsht.codec.{KeyValueCodec, TombstoneEncoder}
 import weaver.*
 
@@ -105,16 +106,12 @@ object FileCompactionTest extends SimpleIOSuite {
       val keysFile = dir / "keys.1.db"
       val valuesFile = dir / "values.1.db"
       for {
-        _ <- fs2.Stream
-          .emits(
-            List(
-              KeyValue(Key("key1"), "value1".getBytes),
-              KeyValue(Key("key2"), "value1".getBytes)
-            )
-          )
-          .through(CompactionFilesUtil.writeKeyValueToCompactionFiles(dir, timestamp = 1.millis))
-          .compile
-          .drain
+        _ <- writeToCompactionFile(
+          dir,
+          timestamp = 1.millis,
+          KeyValue(Key("key1"), "value1".getBytes),
+          KeyValue(Key("key2"), "value1".getBytes)
+        )
         _ <- appendEntriesToDataFile(
           dir / "data.2.db",
           KeyValue(Key("key1"), "value2".getBytes),
@@ -318,51 +315,4 @@ object FileCompactionTest extends SimpleIOSuite {
     }
 
   }
-
-  // TODO: consolidate w/ src and move to Utils files
-  private def appendEntriesToDataFile(file: Path, keyValueEntries: KeyValue*): IO[Unit] =
-    appendToDataFile(file, keyValueEntries.map(_.asRight[Tombstone])*)
-
-  private def appendTombstonesToDataFile(file: Path, tombstones: Tombstone*): IO[Unit] =
-    appendToDataFile(file, tombstones.map(_.asLeft[KeyValue])*)
-
-  private def appendToDataFile(file: Path, keyValueEntries: Either[Tombstone, KeyValue]*): IO[Unit] =
-    fs2.Stream
-      .evals(keyValueEntries.pure[IO])
-      .evalMap(_.fold(TombstoneEncoder.encode, KeyValueCodec.encode))
-      .mapChunks(_.flatMap(Chunk.byteBuffer))
-      .through(Files[IO].writeAll(file, Flags.Append))
-      .compile
-      .drain
-
-  private def getCompactionFiles1(dir: Path): IO[CompactedFiles] =
-    getCompactionFiles(dir).flatMap {
-      case head :: Nil =>
-        head.pure[IO]
-
-      case Nil =>
-        IO.raiseError(new Throwable("Missing Compaction Files"))
-
-      case many =>
-        IO.raiseError(
-          new Throwable(many.map(file => s"Found extra ${file.keys} and ${file.values}").mkString("\n"))
-        )
-    }
-
-  private def getCompactionFiles(dir: Path): IO[List[CompactedFiles]] =
-    attemptListCompactionFiles(dir)
-      .flatMap(_.traverse {
-        case Left(value) =>
-          failure(value).failFast[IO] *>
-            IO.raiseError(new IllegalStateException("Not reachable, just for type sig"))
-
-        case Right(files) =>
-          files.pure[IO]
-      })
-
-  // TODO: common spot for tests
-  // TODO: use expect.eql where appropriate
-  given Show[Array[Byte]] = Show.show(new String(_))
-  given Show[Key] = Show.show(k => s"Key(${k.value.show})")
-  given Show[KeyValue] = Show.show(e => s"KV(${e.key.show}, ${e.value.show})")
 }

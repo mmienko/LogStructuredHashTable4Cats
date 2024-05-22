@@ -2,6 +2,7 @@ package io.lsht
 
 import cats.data.Validated
 import cats.effect.Async
+import cats.effect.std.Console
 import cats.syntax.all.*
 import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
@@ -29,6 +30,14 @@ object CompactionFilesUtil {
       .readAll(compactedFiles.keys)
       .through(CompactedKeysFileDecoder.decode)
       .through(readValuesAndCombine(compactedFiles.values))
+
+  def getValidCompactionFiles[F[_]: Async: Console](dir: Path): F[List[CompactedFiles]] =
+    for {
+      filesOrErrors <- CompactionFilesUtil.attemptListCompactionFiles(dir)
+      _ <- filesOrErrors
+        .collect { case Left(x) => x }
+        .traverse_(err => Console[F].println(s"Failed to read a set of compaction files. $err"))
+    } yield filesOrErrors.collect { case Right(x) => x }
 
   def attemptListCompactionFiles[F[_]: Async](dir: Path): F[List[Either[String, CompactedFiles]]] =
     Files[F]
