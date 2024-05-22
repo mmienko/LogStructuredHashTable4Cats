@@ -5,8 +5,11 @@ import cats.effect.std.{Console, Hotswap, Queue, Supervisor}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError, Monad}
 import fs2.io.file.*
+import fs2.io.file.Watcher.Event
 import fs2.{Chunk, Pipe, Pull, Stream}
 import io.lsht.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, TombstoneEncoder, ValuesCodec}
+
+import scala.concurrent.duration.*
 
 object Database {
 
@@ -31,8 +34,32 @@ object Database {
   //  start times. So first few bytes of file would contain a pointer to another spot in file, only needed
   //  for large files. There is a readRage
 
+  def apply[F[_]: Async: Console](
+      directory: Path,
+      entriesLimit: Int,
+      compactionWatchPollTimeout: FiniteDuration
+  ): Resource[F, LogStructuredHashTable[F]] = apply(directory, entriesLimit, compactionWatchPollTimeout.some)
+
   // TODO: s/Console/Logger/Writer
-  def apply[F[_]: Async: Console](directory: Path, entriesLimit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
+
+  /**
+    * Simple Database with optional compaction. Good method for testing
+    * @param directory
+    *   main DB directory
+    * @param entriesLimit
+    *   number of entries in the active data file before it rotates
+    * @param compactionWatchPollTimeout
+    *   time for poll for new data file must wait before retrying. If set, then compaction is started in background.
+    * @tparam F
+    *   IO
+    * @return
+    *   LogStructuredHashTable, a HashTable backed by log
+    */
+  def apply[F[_]: Async: Console](
+      directory: Path,
+      entriesLimit: Int = 1000,
+      compactionWatchPollTimeout: Option[FiniteDuration] = None
+  ): Resource[F, LogStructuredHashTable[F]] =
     Resource.suspend {
       for {
         _ <- verifyPathIsDirectory[F](directory)
@@ -54,8 +81,12 @@ object Database {
         isClosed <- Ref[F].of(false)
 
         cancelRemainingCommands = drain(queue).flatMap(_.traverse_(_.complete(DatabaseIsClosed)))
+
       } yield Supervisor[F](await = false)
-        .evalMap(_.supervise(seriallyExecuteWrites))
+        .evalTap { sup =>
+          compactionWatchPollTimeout.traverse_(to => sup.supervise(startCompactionInBackground(directory, to)))
+        }
+        .evalTap(_.supervise(seriallyExecuteWrites))
         .onFinalize(isClosed.set(true) >> cancelRemainingCommands)
         .as(new LogStructuredHashTable(queue, index, isClosed))
     }
@@ -154,6 +185,26 @@ object Database {
           }
         }
     } yield index
+
+  private def startCompactionInBackground[F[_]: Async: Console](
+      directory: Path,
+      compactionWatchPollTimeout: FiniteDuration
+  ) =
+    Files[F]
+      .watch(
+        directory,
+        types = List[Watcher.EventType](Watcher.EventType.Created),
+        modifiers = Nil,
+        pollTimeout = compactionWatchPollTimeout
+      )
+      .filter(_.isInstanceOf[Event.Created])
+      .drop(1) // active data file is always created so skip it
+      .sliding(size = 2, step = 2) // every 2 files, run compaction
+      .map(_.size)
+      .filter(_ === 2) // Ignore last file
+      .evalMap(_ => FileCompaction.run(directory))
+      .compile
+      .drain
 
   private def interpretCommand[F[_]: Async: Console: Clock](index: Ref[F, Map[Key, FileReference]])(
       cmd: WriteCommand[F]

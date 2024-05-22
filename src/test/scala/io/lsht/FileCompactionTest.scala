@@ -1,13 +1,11 @@
 package io.lsht
 
 import cats.Show
-import cats.effect.IO
+import cats.effect.std.Supervisor
+import cats.effect.{Deferred, IO, Resource}
 import cats.syntax.all.*
-import fs2.Chunk
-import fs2.io.file.{Files, Flags, Path}
-import io.lsht.CompactionFilesUtil.{attemptListCompactionFiles, writeKeyValueToCompactionFiles}
+import fs2.io.file.{Files, Path, Watcher}
 import io.lsht.TestUtils.{given_Show_Key, *}
-import io.lsht.codec.{KeyValueCodec, TombstoneEncoder}
 import weaver.*
 
 import scala.concurrent.duration.*
@@ -314,5 +312,32 @@ object FileCompactionTest extends SimpleIOSuite {
           failure(s"Expecting exactly 6 elements, instead got ${entriesOrErrors.length}")
     }
 
+  }
+
+  test("Database runs compaction whenever at least 2 data files are created") {
+    (for {
+      dir <- tempDirectory
+      sup <- Supervisor[IO]
+      db <- Database[IO](dir, entriesLimit = 1, compactionWatchPollTimeout = 200.millis)
+      res <- Resource.eval {
+        for {
+          compaction <- Deferred[IO, Unit]
+          _ <- sup.supervise {
+            Files[IO]
+              .watch(dir, types = List(Watcher.EventType.Created), modifiers = Nil, pollTimeout = 200.millis)
+              .collect { case Watcher.Event.Created(path, _) => path }
+              .filter(_.fileName.toString.startsWith("keys"))
+              .evalMap(_ => compaction.complete(()))
+              .compile
+              .drain
+          }
+
+          _ <- putAll(db)((0 to 4).map(i => KeyValue(s"k$i", s"v$i"))*)
+
+          _ <- compaction.get.timeout(5.seconds)
+          compactionFiles <- getCompactionFiles(dir)
+        } yield expect(compactionFiles.nonEmpty)
+      }
+    } yield res).use(_.pure[IO])
   }
 }
