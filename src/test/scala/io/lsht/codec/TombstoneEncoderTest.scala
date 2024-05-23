@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.syntax.all.*
 import io.lsht.Key
 import io.lsht.codec.CodecCommons.*
-import io.lsht.codec.TombstoneEncoder
 import weaver.*
 
 object TombstoneEncoderTest extends SimpleIOSuite {

@@ -1,7 +1,6 @@
 package io.lsht.codec
 
 import cats.effect.IO
-import cats.syntax.all.*
 import fs2.Chunk
 import io.lsht.codec.CodecCommons.*
 import weaver.*
