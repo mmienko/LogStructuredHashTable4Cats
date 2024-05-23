@@ -142,24 +142,6 @@ object FileCompactionTest extends SimpleIOSuite {
   ) { ignore("TODO") }
 
   /*
-  1. No data files : broken state - noop
-  2. 1 Data file : active - noop
-  3. Many Data files - active and inactive - 1 compaction files set, delete inactive files
-  4. TODO: Compaction files set is missing a file : broken state - noop
-  5. No data files & 1 Compaction file set : broken state - noop
-  6. 1 data files & 1 Compaction file set : normal state (compaction process ran quicker than file rotation) - noop
-  7. Many data files & 1 Compaction file set :
-      a. normal state (file rotation ran quicker than compaction process) - new compaction files set, delete inactive files, delete old compaction file
-      b. previous compaction did not finish - restart compaction like in step 3 + delete temp compaction files
-  8. Many data files & Many Compaction file sets : broken state (since last valid/non-temporary compaction file) - new compaction file, deleted inactive files, deleted old compaction files
-   */
-
-  /*
-  for 7b, write to temp location, then move file, then delete
-   */
-
-  /*
-  TODO: New file?
   CompactionAlgorithm Tests
    */
   test("Compaction on a file with unique keys produces non-reduced compaction files") {

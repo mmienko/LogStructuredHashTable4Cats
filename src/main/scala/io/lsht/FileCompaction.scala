@@ -11,15 +11,20 @@ import fs2.io.file.*
 
 import scala.collection.immutable.VectorMap
 
-// TODO: don't expose to public api
 object FileCompaction {
 
   type RecordByFile = (Path, Offset, KeyValue | Tombstone)
 
-  // TODO: immutable.VectorMap vs mutable.LinkedListHashMap
   private val EmptyIndex = VectorMap.empty[Key, CompactedValue | KeyValueFileReference]
-  // TODO: there should be a critical section as only 1 compaction process should be running
 
+  /*
+  Compaction is broken up into 2 phases, load meta data, then ETL records in streaming fashion
+  into compacted files.
+  Load all Compacted Key File References (metadata) for the compacted data files. Then,
+  load all KeyValue File References (metadata) for all inactive data files. Finally, in a
+  streaming fashion, ETL each individual record to the compacted files. This "phasing" saves space
+  as not all values need to be kept in memory at the same time.
+   */
   def run[F[_]: Async: Console](databaseDirectory: Path): F[Unit] =
     getInactiveDatafiles(databaseDirectory).flatMap { inactiveDataFiles =>
       for {
@@ -44,7 +49,6 @@ object FileCompaction {
         }
 
         (compactedFiles, compactedIndex) = compactedFilesWithIndex.unzip
-
         keyValueReferences <- Stream
           .emits(inactiveDataFiles)
           .flatMap { dataFile =>
@@ -111,8 +115,6 @@ object FileCompaction {
       s.pull.uncons1.flatMap {
         // The Stream of Entries is ordered by File, so once we swap to a new file, we no longer read any of the old files.
         case Some(((key, CompactedValue(offset, length)), tail)) =>
-          // TODO: these two Some cases feel the same, but maybe different enough to leave alone
-          // TODO: would be nice to have some decode syntax over cursors, instead of having to remember Codec HeaderSize
           for {
             readResult <- valuesFileCursor.get
               .seek(offset)

@@ -11,7 +11,6 @@ import scala.util.control.NoStackTrace
 
 object DataFileDecoder {
 
-  // TODO: Adt's instead of |
   type ParsedKeyValue = ParsedHeaderState[KeyValue]
   type ParsedKeyValueFileReference = Either[Throwable, (Key, KeyValueFileReference) | Tombstone]
   private type ParsedHeaderState[A] = (Either[Throwable, A | Tombstone], Offset)
@@ -28,6 +27,7 @@ object DataFileDecoder {
     final case class Tombstone(offset: Offset, checksum: Int, keySize: KeySize, bytes: Chunk[Byte]) extends HeaderState
   }
 
+  // Used by file compaction during index loading of inactive Data Files, CRC check is performed later.
   def decodeAsFileReference[F[_]: Sync](dataFile: Path): Pipe[F, Byte, ParsedKeyValueFileReference] = {
     val pipe = decodeKeyValueState { kvHeader =>
       val keyHeader = kvHeader.keyHeader
@@ -83,7 +83,6 @@ object DataFileDecoder {
         the end of the stream.
          */
         case None =>
-          // TODO: if less than HeaderSize, then header is incomplete
           s.pull.unconsN(CodecUtils.CommonHeaderSize).flatMap {
             case Some((headerBytes, tail)) =>
               val bb = headerBytes.toByteBuffer
@@ -169,7 +168,7 @@ object DataFileDecoder {
     val checksum = bb.getInt
     val _ = bb.get // skip tombstone
 
-    // TODO: how to enforce CRC? Probably need to read whole value
+    // Skip CRC check as this is for index loading during File Compaction
     Sync[F].delay {
       val keySize = bb.getInt
       val valueSize = bb.getInt

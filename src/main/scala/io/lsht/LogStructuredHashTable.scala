@@ -38,7 +38,6 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
   private def doGet(key: Key): F[Option[Value]] =
     index.get.map(_.get(key)).flatMap {
       case Some(fileReference) =>
-        // TODO: Use an object pool for efficient resource/file management
         Files[F]
           .open(fileReference.file, Flags.Read)
           .adaptErr { case err: java.nio.file.FileSystemException =>
@@ -104,7 +103,6 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
 
   /*
   There is still a race whenever using this method, however it may help catch bugs during improper use of Resource's
-  TODO: Consider removing this
    */
   private def validateDbIsOpen =
     isClosed.get.flatMap(

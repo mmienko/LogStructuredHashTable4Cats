@@ -120,7 +120,6 @@ object CompactionFilesUtil {
             .seek(offset)
             .readPull(ValuesCodec.HeaderSize + length)
             .map(_.map(_._2))
-            // TODO: better errors
             .evalMap {
               case Some(bytes) =>
                 ValuesCodec

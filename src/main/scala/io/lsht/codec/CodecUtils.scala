@@ -13,7 +13,6 @@ object CodecUtils {
   val CommonHeaderSize: Int = 4 + // 4-byte CRC
     1 + // 1-byte MetaData, first bit is boolean tombstone
     4 // 4-byte Key Size
-  // TODO?:    4 + // 4-byte Timestamp
 
   def addCrc[F[_]: Sync](bb: ByteBuffer, totalSize: Int): F[Unit] =
     for {

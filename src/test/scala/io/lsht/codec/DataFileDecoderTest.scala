@@ -3,8 +3,7 @@ package io.lsht.codec
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.Path
-import io.lsht.codec.CodecCommons.ChecksumSize
-import io.lsht.codec.{DataFileDecoder, KeyValueCodec, TombstoneEncoder}
+import io.lsht.codec.KeyValueCodec
 import io.lsht.{Key, KeyValue, KeyValueFileReference, Tombstone}
 import weaver.*
 
