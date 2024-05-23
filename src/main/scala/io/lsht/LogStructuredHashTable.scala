@@ -129,9 +129,6 @@ class LogStructuredHashTable[F[_]: Async] private[lsht] (
 
 object LogStructuredHashTable {
 
-  def apply[F[_]: Async: Console](directory: Path, limit: Int = 1000): Resource[F, LogStructuredHashTable[F]] =
-    Database(directory, limit)
-
   class ReadException(cause: Option[Throwable]) extends Throwable(cause.orNull)
 
   object ReadErrors {

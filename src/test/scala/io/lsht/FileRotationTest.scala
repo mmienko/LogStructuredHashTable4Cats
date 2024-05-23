@@ -11,7 +11,7 @@ object FileRotationTest extends SimpleIOSuite {
   test("files are rotated") {
     Files[IO].tempDirectory.use { dir =>
       for {
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        _ <- Database[IO](dir, entriesLimit = 3).use { db =>
           (db.put(Key("k1"), "v1".getBytes) *> db.delete(Key("k1")) *> db.put(Key("k1"), "v2".getBytes))
             .replicateA(3)
         }
@@ -26,13 +26,13 @@ object FileRotationTest extends SimpleIOSuite {
   test("data from previous data files is loaded") {
     Files[IO].tempDirectory.use { dir =>
       for {
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        _ <- Database[IO](dir, entriesLimit = 3).use { db =>
           (0 to 3).toList.traverse_ { i =>
             val key = Key(s"k$i")
             db.put(key, "v1".getBytes) *> db.delete(key) *> db.put(key, "v2".getBytes)
           }
         }
-        gets <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        gets <- Database[IO](dir, entriesLimit = 3).use { db =>
           (0 until 3).toList.traverse(i => db.get(Key(s"k$i")))
         }
         values = gets.collect { case Some(v) => v }
@@ -48,12 +48,12 @@ object FileRotationTest extends SimpleIOSuite {
       val key3 = Key("k3")
       val key4 = Key("k4")
       for {
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        _ <- Database[IO](dir, entriesLimit = 3).use { db =>
           db.put(key1, "v1".getBytes) *> db.put(key2, "v1".getBytes) *> db.put(key3, "v1".getBytes) *>
             db.put(key4, "v1".getBytes) *> db.put(key1, "v2".getBytes) *> db.delete(key2) *>
             db.put(key4, "v2".getBytes) *> db.put(key1, "v3".getBytes)
         }
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        _ <- Database[IO](dir, entriesLimit = 3).use { db =>
           db.get(key1).map(expectSomeString("v3")).flatMap(_.failFast) *>
             db.get(key2).map(res => expect(res.==(none[Value]))).flatMap(_.failFast) *>
             db.get(key3).map(expectSomeString("v1")).flatMap(_.failFast) *>
@@ -66,10 +66,10 @@ object FileRotationTest extends SimpleIOSuite {
   test("blank files don't break loading database") {
     Files[IO].tempDirectory.use { dir =>
       for {
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use { db =>
+        _ <- Database[IO](dir, entriesLimit = 3).use { db =>
           db.put(Key("k1"), "v1".getBytes) *> db.delete(Key("k1")) *> db.put(Key("k1"), "v2".getBytes)
         }
-        _ <- LogStructuredHashTable[IO](dir, limit = 3).use_
+        _ <- Database[IO](dir, entriesLimit = 3).use_
       } yield success
     }
   }

@@ -53,8 +53,8 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
     Files[IO].tempDirectory
       .use { dir =>
         for {
-          _ <- LogStructuredHashTable[IO](dir).use(_.put(key, value))
-          res <- LogStructuredHashTable[IO](dir).use(_.get(key))
+          _ <- Database[IO](dir).use(_.put(key, value))
+          res <- Database[IO](dir).use(_.get(key))
         } yield exists(res)(expectString("value"))
       }
   }
@@ -99,13 +99,13 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
           .evals(keys.pure[IO])
           .chunkN(valuesCardinality)
           .evalMap { keys =>
-            LogStructuredHashTable[IO](dir).use { db =>
+            Database[IO](dir).use { db =>
               keys.zipWithIndex.parTraverse_ { case (key, i) => db.put(key, s"value$i".getBytes) }
             }
           }
           .compile
           .drain
-        gets <- LogStructuredHashTable[IO](dir)
+        gets <- Database[IO](dir)
           .use(db => keys.parTraverse(db.get))
         values = gets.collect { case Some(v) => new String(v) }.toSet
       } yield expect.eql(values, Set.tabulate(valuesCardinality)(i => "value" + i))
@@ -134,11 +134,11 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
       .use { dir =>
         val key1 = Key("key1")
         val key2 = Key("key2")
-        LogStructuredHashTable[IO](dir).use { db =>
+        Database[IO](dir).use { db =>
           db.put(key1, "value1".getBytes) *>
             db.put(key2, "value2".getBytes) *>
             db.delete(key1)
-        } *> LogStructuredHashTable[IO](dir)
+        } *> Database[IO](dir)
           .use { db =>
             db.get(key1)
               .flatMap(res1 => db.get(key2).tupleLeft(res1))
@@ -146,7 +146,7 @@ object LogStructuredHashTableTest extends SimpleIOSuite {
           }
           .flatMap { case (res1, res2) =>
             (expect(res1.isEmpty) and exists(res2)(expectString("value2"))).failFast
-          } *> LogStructuredHashTable[IO](dir)
+          } *> Database[IO](dir)
           .use { db =>
             db.get(key2)
           }
