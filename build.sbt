@@ -10,15 +10,16 @@ lazy val root = (project in file("."))
 
 lazy val cli = (project in file("cli"))
   .settings(
-    name := "LogStructuredHashTable4CatsCli",
+    name := "cli",
     libraryDependencies += "org.typelevel" %% "cats-effect" % "3.5.4",
     libraryDependencies += "co.fs2" %% "fs2-core" % "3.10.1",
     libraryDependencies += "com.monovore" %% "decline-effect" % "2.4.1"
-  ).dependsOn(engine)
+  )
+  .dependsOn(engine)
 
 lazy val engine = (project in file("engine"))
   .settings(
-    name := "LogStructuredHashTable4CatsEngine",
+    name := "engine",
     libraryDependencies += "org.typelevel" %% "cats-effect" % "3.5.4",
     libraryDependencies += "co.fs2" %% "fs2-core" % "3.10.1",
     libraryDependencies += "co.fs2" %% "fs2-io" % "3.10.1",
