@@ -1,4 +1,4 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.syntax.all.*
 import weaver.*

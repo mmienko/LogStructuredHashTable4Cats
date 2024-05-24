@@ -1,9 +1,9 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.{Pipe, Pull}
-import io.lsht.{CompactedKey, CompactedValue, Key}
+import io.lsht.engine.{CompactedKey, CompactedValue, Key}
 
 object CompactedKeysFileDecoder {
 

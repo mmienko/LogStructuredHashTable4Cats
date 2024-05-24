@@ -1,9 +1,9 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.*
+import io.lsht.engine.*
 
 import java.nio.ByteBuffer
 

@@ -1,11 +1,11 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.data.NonEmptyList
 import cats.effect.std.{Console, Hotswap}
 import cats.effect.{Async, Clock}
 import cats.syntax.all.*
 import cats.{Applicative, ApplicativeError}
-import io.lsht.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, ValuesCodec}
+import io.lsht.engine.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, ValuesCodec}
 import fs2.*
 import fs2.io.file.*
 

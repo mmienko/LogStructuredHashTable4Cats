@@ -1,10 +1,10 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.Path
-import io.lsht.codec.KeyValueCodec
-import io.lsht.{Key, KeyValue, KeyValueFileReference, Tombstone}
+import io.lsht.engine.codec.KeyValueCodec
+import io.lsht.engine.{Key, KeyValue, KeyValueFileReference, Tombstone}
 import weaver.*
 
 import java.nio.ByteBuffer

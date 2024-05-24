@@ -1,4 +1,4 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.data.Validated
 import cats.effect.Async
@@ -6,8 +6,8 @@ import cats.effect.std.Console
 import cats.syntax.all.*
 import fs2.io.file.*
 import fs2.{Chunk, Pipe, Pull, Stream}
-import io.lsht.codec.{CompactedKeyCodec, CompactedKeysFileDecoder, ValuesCodec}
-import io.lsht.{KeyValue, given_Ordering_Path}
+import io.lsht.engine.codec.{CompactedKeyCodec, CompactedKeysFileDecoder, ValuesCodec}
+import io.lsht.engine.{KeyValue, given_Ordering_Path}
 
 import scala.concurrent.duration.FiniteDuration
 

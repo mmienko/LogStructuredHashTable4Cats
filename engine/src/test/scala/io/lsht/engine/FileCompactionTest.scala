@@ -1,11 +1,11 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.Show
 import cats.effect.std.Supervisor
 import cats.effect.{Deferred, IO, Resource}
 import cats.syntax.all.*
 import fs2.io.file.{Files, Path, Watcher}
-import io.lsht.TestUtils.{given_Show_Key, *}
+import TestUtils.{given_Show_Key, *}
 import weaver.*
 
 import scala.concurrent.duration.*

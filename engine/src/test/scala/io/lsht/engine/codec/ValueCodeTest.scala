@@ -1,8 +1,8 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.IO
 import fs2.Chunk
-import io.lsht.codec.CodecCommons.*
+import CodecCommons.*
 import weaver.*
 
 object ValueCodeTest extends SimpleIOSuite {

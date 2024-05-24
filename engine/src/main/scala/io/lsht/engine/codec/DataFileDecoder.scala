@@ -1,11 +1,11 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.Sync
 import cats.syntax.all.*
 import fs2.io.file.Path
 import fs2.{Chunk, Pipe, Pull}
-import io.lsht.*
-import io.lsht.codec.KeyValueCodec.ValueSizeSize
+import io.lsht.engine.*
+import io.lsht.engine.codec.KeyValueCodec.ValueSizeSize
 
 import scala.util.control.NoStackTrace
 

@@ -1,14 +1,14 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
-import io.lsht.LogStructuredHashTable.ReadErrors
-import io.lsht.LogStructuredHashTableTest.{expect, matches, test}
-import io.lsht.TestUtils.tempDatabaseWithDir
-import io.lsht.Value.equality
-import io.lsht.codec.KeyValueCodec
+import LogStructuredHashTable.ReadErrors
+import LogStructuredHashTableTest.{expect, matches, test}
+import TestUtils.tempDatabaseWithDir
+import Value.equality
+import io.lsht.engine.codec.KeyValueCodec
 import weaver.*
 
 import java.nio.file.AccessDeniedException

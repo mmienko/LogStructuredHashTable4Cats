@@ -1,4 +1,4 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.ApplicativeError
 import cats.effect.Sync

@@ -1,11 +1,11 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.*
-import io.lsht.TestUtils.{StringKeyOrdering, given_Show_Array, writeToCompactionFile, *}
-import io.lsht.Value.equality
+import TestUtils.{StringKeyOrdering, given_Show_Array, writeToCompactionFile, *}
+import Value.equality
 import weaver.*
 
 import scala.concurrent.duration.*

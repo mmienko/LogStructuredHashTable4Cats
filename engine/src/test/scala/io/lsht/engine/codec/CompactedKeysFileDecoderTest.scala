@@ -1,9 +1,9 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.IO
 import fs2.Chunk
 import io.lsht
-import io.lsht.{CompactedKey, CompactedValue, Key, KeyValue}
+import io.lsht.engine.{CompactedKey, CompactedValue, Key, KeyValue}
 import weaver.*
 
 object CompactedKeysFileDecoderTest extends SimpleIOSuite {
@@ -35,7 +35,7 @@ object CompactedKeysFileDecoderTest extends SimpleIOSuite {
       .flatTap(list => expect.eql(list.length, 5).failFast)
       .map(forEach(_) { case (res, i) =>
         whenSuccess(res) { compactedKey =>
-          expect.eql(compactedKey, CompactedKey(Key(s"key$i"), lsht.CompactedValue(offset = i * 10, length = 5)))
+          expect.eql(compactedKey, CompactedKey(Key(s"key$i"), CompactedValue(offset = i * 10, length = 5)))
         }
       })
   }

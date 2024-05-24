@@ -1,10 +1,10 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.Eq
 import cats.effect.{Deferred, GenConcurrent}
 import cats.syntax.all.*
 import fs2.io.file.Path
-import io.lsht.Value.equality
+import io.lsht.engine.Value.equality
 
 import java.util
 

@@ -1,9 +1,9 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.IO
 import cats.syntax.all.*
-import io.lsht.Key
-import io.lsht.codec.CodecCommons.*
+import CodecCommons.*
+import io.lsht.engine.Key
 import weaver.*
 
 object TombstoneEncoderTest extends SimpleIOSuite {

@@ -1,9 +1,9 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.io.file.Files
-import io.lsht.TestUtils.{DataFileNamePattern, expectSomeString, expectString}
+import TestUtils.{DataFileNamePattern, expectSomeString, expectString}
 import weaver.*
 
 object FileRotationTest extends SimpleIOSuite {

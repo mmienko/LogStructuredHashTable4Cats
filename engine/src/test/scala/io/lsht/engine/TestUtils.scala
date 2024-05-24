@@ -1,13 +1,13 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.Show
 import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import fs2.Chunk
 import fs2.io.file.{Files, Flags, Path}
-import io.lsht.CompactionFilesUtil.attemptListCompactionFiles
-import io.lsht.FileCompactionTest.failure
-import io.lsht.codec.{KeyValueCodec, TombstoneEncoder}
+import CompactionFilesUtil.attemptListCompactionFiles
+import FileCompactionTest.failure
+import io.lsht.engine.codec.{KeyValueCodec, TombstoneEncoder}
 import weaver.{Expect, Expectations}
 
 import scala.concurrent.duration.FiniteDuration

@@ -1,8 +1,8 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.Sync
 import cats.implicits.*
-import io.lsht.{Key, KeyValue}
+import io.lsht.engine.{Key, KeyValue}
 import fs2.*
 
 import java.nio.ByteBuffer

@@ -1,10 +1,10 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.IO
 import fs2.Chunk
-import io.lsht.codec.CodecCommons.*
-import io.lsht.codec.KeyValueCodecTest.expect
-import io.lsht.{CompactedKey, CompactedValue, Key, KeyValue}
+import CodecCommons.*
+import KeyValueCodecTest.expect
+import io.lsht.engine.{CompactedKey, CompactedValue, Key, KeyValue}
 import weaver.*
 
 object CompactedKeyCodecTest extends SimpleIOSuite {

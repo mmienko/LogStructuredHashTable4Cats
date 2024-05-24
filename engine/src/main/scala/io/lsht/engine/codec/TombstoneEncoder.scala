@@ -1,9 +1,9 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.Sync
 import cats.syntax.all.*
-import io.lsht.Key
-import io.lsht.codec.CodecUtils.CommonHeaderSize
+import CodecUtils.CommonHeaderSize
+import io.lsht.engine.Key
 
 import java.nio.ByteBuffer
 

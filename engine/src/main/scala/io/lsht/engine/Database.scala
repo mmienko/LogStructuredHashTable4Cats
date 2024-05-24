@@ -1,4 +1,4 @@
-package io.lsht
+package io.lsht.engine
 
 import cats.effect.*
 import cats.effect.std.{Console, Hotswap, Queue, Supervisor}
@@ -7,7 +7,8 @@ import cats.{Applicative, ApplicativeError, Monad}
 import fs2.io.file.*
 import fs2.io.file.Watcher.Event
 import fs2.{Chunk, Pipe, Pull, Stream}
-import io.lsht.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, TombstoneEncoder, ValuesCodec}
+import io.lsht.engine
+import io.lsht.engine.codec.{CompactedKeysFileDecoder, DataFileDecoder, KeyValueCodec, TombstoneEncoder, ValuesCodec}
 
 import scala.concurrent.duration.*
 
@@ -137,7 +138,7 @@ object Database {
             case (Right(kv: KeyValue), offset, dataFile) =>
               index.updated(
                 kv.key,
-                KeyValueFileReference(
+                engine.KeyValueFileReference(
                   dataFile,
                   offset = offset,
                   length = KeyValueCodec.size(kv)

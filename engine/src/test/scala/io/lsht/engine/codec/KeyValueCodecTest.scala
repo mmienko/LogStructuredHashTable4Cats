@@ -1,10 +1,10 @@
-package io.lsht.codec
+package io.lsht.engine.codec
 
 import cats.effect.*
 import cats.syntax.all.*
 import fs2.Chunk
-import io.lsht.codec.CodecCommons.*
-import io.lsht.{Key, KeyValue}
+import CodecCommons.*
+import io.lsht.engine.{Key, KeyValue}
 import weaver.*
 
 import java.nio.ByteBuffer
