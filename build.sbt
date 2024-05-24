@@ -4,7 +4,13 @@ ThisBuild / scalaVersion := "3.4.0"
 
 lazy val root = (project in file("."))
   .settings(
-    name := "LogStructuredHashTable4Cats",
+    name:= "LogStructuredHashTable4Cats"
+  )
+  .aggregate(engine)
+
+lazy val engine = (project in file("engine"))
+  .settings(
+    name := "LogStructuredHashTable4CatsEngine",
     libraryDependencies += "org.typelevel" %% "cats-effect" % "3.5.4",
     libraryDependencies += "com.monovore" %% "decline-effect" % "2.4.1",
     libraryDependencies += "co.fs2" %% "fs2-core" % "3.10.1",
