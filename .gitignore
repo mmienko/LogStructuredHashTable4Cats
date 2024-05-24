@@ -1,3 +1,4 @@
 target
 .bsp
 tmp/*
+test_db/
