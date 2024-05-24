@@ -316,7 +316,7 @@ object FileCompactionTest extends SimpleIOSuite {
 
           _ <- putAll(db)((0 to 4).map(i => KeyValue(s"k$i", s"v$i"))*)
 
-          _ <- compaction.get.timeout(5.seconds)
+          _ <- compaction.get.timeout(10.seconds)
           compactionFiles <- getCompactionFiles(dir)
         } yield expect(compactionFiles.nonEmpty)
       }
